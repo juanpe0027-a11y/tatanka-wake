@@ -1707,7 +1707,7 @@ async function loadModels() {
   // Rupert de rider: se baja mientras tanto (si lo eligen antes, sigue Senén hasta que llega)
   const rup = await new Promise(res => loader.load('rupert.glb' + v, res, undefined, () => res(null)));
   const h = rup && setupHuman(rup); if (h) { RIDERS.rupert = h; if (RIDER_NAME === 'rupert') setRider('rupert'); }
-  const om = await new Promise(res => loader.load('omar.glb' + v, res, undefined, () => res(null)));
+  const om = await new Promise(res => loader.load('omar.glb?v=3', res, undefined, () => res(null)));
   const ho = om && setupHuman(om); if (ho) { RIDERS.omar = ho; if (RIDER_NAME === 'omar') setRider('omar'); }
   READY.extras = true;
 }
