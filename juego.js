@@ -1011,7 +1011,7 @@ function setLandRing(frac, ok) {
 // =====================================================================================
 //  EL RIDER: cuerda, carving, pop, aire, trucos, aterrizaje y caídas
 // =====================================================================================
-const ROPE = 22.9;   // 75 pies, como en Pocket Shredders
+let ROPE = 22.9;   // 75 pies, como en Pocket Shredders (online: cada uno con un largo distinto)
 const RIDER = {
   state: 'ride', theta: 0.05, omega: 0, y: 0, vy: 0, pos: V3(), prevPos: V3(), vel: V3(),
   sw: false, yaw: 0, yawAnim: 0, edge: 0, crouch: 0.35, lean: 0,
@@ -1701,6 +1701,115 @@ function poseDriver(turn, t) {
 }
 
 // =====================================================================================
+//  ONLINE: la sala del Pantalán. Todos van detrás de la misma Tatanka, en la misma estela, cada uno con
+//  su cuerda de un largo distinto para que no se toquen. La barca va sincronizada con la hora del servidor.
+//  (Firebase: el mismo proyecto que el surf; sala «wake-pantalan»)
+// =====================================================================================
+const FIREBASE_CONFIG = { apiKey: 'AIzaSyBYEgJnEQxYbgT97giPRuTaRNd5d9vF8tg', authDomain: 'surf-sagunto.firebaseapp.com', databaseURL: 'https://surf-sagunto-default-rtdb.europe-west1.firebasedatabase.app', projectId: 'surf-sagunto', storageBucket: 'surf-sagunto.firebasestorage.app', messagingSenderId: '669179228796', appId: '1:669179228796:web:1e39377632d94fa1c50ff9' };
+const ROPES = [22.9, 18.3, 27.4, 15.2, 30.5, 12.2];   // 75, 60, 90, 50, 100 y 40 pies
+const NET = { db: null, me: null, id: 'w' + Math.random().toString(36).slice(2, 10), peers: {}, offset: 0, connected: false, sendT: 0, lane: 0, laneLocked: false };
+const netNow = () => Date.now() + NET.offset;
+function loadScript(src) { return new Promise((res, rej) => { const e = document.createElement('script'); e.src = src; e.onload = res; e.onerror = rej; document.head.appendChild(e); }); }
+(async function netStart() {
+  const mp = $('mpMenu');
+  try {
+    if (!window.firebase) { await loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js'); await loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js'); }
+    firebase.initializeApp(FIREBASE_CONFIG); NET.db = firebase.database();
+    NET.base = NET.db.ref('salas/wake-pantalan'); NET.me = NET.base.child('players/' + NET.id);
+    NET.db.ref('.info/serverTimeOffset').on('value', v => { NET.offset = v.val() || 0; });
+    NET.db.ref('.info/connected').on('value', v => { NET.connected = !!v.val(); if (NET.connected) { NET.me.onDisconnect().remove(); NET.sendT = 0; } netMenu(); });
+    const pl = NET.base.child('players');
+    pl.on('child_added', v => peerData(v.key, v.val())); pl.on('child_changed', v => peerData(v.key, v.val())); pl.on('child_removed', v => peerGone(v.key));
+    addEventListener('pagehide', () => { try { NET.me.remove(); } catch (e) {} });
+    mp.textContent = '🌊 Conectando a la sala del Pantalán…';
+  } catch (e) { mp.textContent = '🌊 Sin conexión: juegas solo'; }
+})();
+function peerData(id, v) {
+  if (id === NET.id || !v || !v.st) return;
+  const P = NET.peers[id] || (NET.peers[id] = { id, vis: null, d: V3(), q: new T.Quaternion(), first: true });
+  P.st = v.st; P.ch = v.ch; P.seen = performance.now();
+  netMenu();
+}
+function peerGone(id) { const P = NET.peers[id]; if (!P) return; if (P.vis) { scene.remove(P.vis.root, P.vis.rope); } delete NET.peers[id]; netMenu(); }
+// carril = largo de cuerda: el primero libre al entrar, y se queda fijo mientras juegas
+function pickLane() {
+  const used = new Set(Object.values(NET.peers).filter(P => P.st && P.st.p).map(P => P.st.ln));
+  let ln = 0; while (used.has(ln) && ln < ROPES.length - 1) ln++;
+  NET.lane = ln; ROPE = ROPES[ln];
+}
+function netMenu() {
+  const ps = Object.values(NET.peers).filter(P => P.st);
+  const names = ps.map(P => (P.st.n || 'Rider') + (P.st.p ? '' : ' (en el menú)'));
+  if (NET.connected) $('mpMenu').textContent = ps.length ? `🌊 Sala del Pantalán · ${ps.length + 1} conectados: tú, ${names.join(', ')}` : '🌊 Sala del Pantalán · de momento solo tú (pasa el enlace a tus amigos)';
+  // marcador en el juego
+  let box = $('mpList');
+  if (!box) { box = document.createElement('div'); box.id = 'mpList'; box.style.cssText = 'position:absolute;right:max(14px,env(safe-area-inset-right));top:74px;text-align:right;font:700 12px/1.45 system-ui,sans-serif;letter-spacing:.04em;text-shadow:0 1px 4px rgba(0,0,0,.7);pointer-events:none'; $('hud').appendChild(box); }
+  const rows = ps.filter(P => P.st.p).map(P => `${esc(P.st.n || 'Rider')} · ${(P.st.s || 0).toLocaleString('es-ES')}`);
+  box.innerHTML = rows.join('<br>');
+}
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// la barca de todos va por el mismo sitio a la misma hora
+function netSyncBoat(dt) {
+  if (!NET.connected) return;
+  const L = PATH.len, target = (netNow() / 1000 * BOAT.speed) % L;
+  let d = ((target - BOAT.s) % L + L) % L; if (d > L / 2) d -= L;
+  if (Math.abs(d) > 30) { BOAT.s += d; trail.pts.length = 0; }       // salto (al entrar o tras una pausa)
+  else BOAT.s += clamp(d, -2 * dt, 2 * dt);
+}
+function netSend(dt) {
+  if (!NET.connected || !NET.me) return;
+  NET.sendT -= dt; if (NET.sendT > 0) return; NET.sendT = 0.12;
+  const R = RIDER, a = R.air, q = riderRoot.quaternion, rp = riderRoot.position, r2 = v => Math.round(v * 100) / 100, r3 = v => Math.round(v * 1000) / 1000;
+  const gp = a && a.grab ? ({ japan: 'indy', method: 'stale', fashion: 'stale' }[a.grab] || a.grab) : '';
+  const st = {
+    n: ($('nick').value.trim() || RIDER_INFO[RIDER_NAME][0]).slice(0, 16), b: boardIdx, p: GAME.running ? 1 : 0, ln: NET.lane, s: R.score,
+    dx: r2(rp.x - boat.position.x), dy: r2(rp.y), dz: r2(rp.z - boat.position.z), q: [r3(q.x), r3(q.y), r3(q.z), r3(q.w)],
+    c: r2(R.crouch), l: r2(R.state === 'air' ? 0 : R.lean), g: gp, rl: r2(a ? a.raley : 0), sw: R.sw ? 1 : 0, ho: R.state !== 'fallen' ? 1 : 0,
+  };
+  NET.me.set({ ch: RIDER_NAME, st }).catch(() => {});
+}
+function makeLabel(text) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64; const x = c.getContext('2d');
+  x.font = '700 34px system-ui, sans-serif'; x.textAlign = 'center'; x.lineWidth = 6; x.strokeStyle = 'rgba(0,0,0,.6)'; x.strokeText(text, 128, 44); x.fillStyle = '#fff'; x.fillText(text, 128, 44);
+  const sp = new T.Sprite(new T.SpriteMaterial({ map: new T.CanvasTexture(c), depthTest: false, transparent: true })); sp.scale.set(2.4, 0.6, 1); sp.renderOrder = 5; return sp;
+}
+// el rider de otro jugador: su personaje, su tabla, su cuerda y su nombre encima
+function buildPeer(P) {
+  const st = P.st, name = RIDERS[P.ch] ? P.ch : 'senen', src = RIDERS[name]; if (!src) return null;
+  const root = new T.Group(), h = setupHuman({ scene: T.SkeletonUtils.clone(src.sc) }); if (!h) return null;
+  const board = BOARDS[st.b] ? BOARDS[st.b].clone() : BOARDS[0].clone();
+  root.add(board, h.root); scene.add(root);
+  const rope = new T.Mesh(CYL, ropeMat); scene.add(rope);
+  const label = makeLabel(st.n || 'Rider'); label.position.set(0, 2.3, 0); root.add(label);
+  return { root, h, board, rope, label, ch: P.ch, b: st.b, n: st.n };
+}
+const peerTmp = { tow: V3(), hand: V3(), a: V3(), d: V3(), q: new T.Quaternion() };
+function updatePeers(dt) {
+  if (!READY.on) return;
+  for (const id in NET.peers) {
+    const P = NET.peers[id], st = P.st;
+    if (!st || !st.p || performance.now() - P.seen > 6000) { if (P.vis) { P.vis.root.visible = P.vis.rope.visible = false; } continue; }
+    if (P.vis && (P.vis.ch !== P.ch || P.vis.b !== st.b || P.vis.n !== st.n)) { scene.remove(P.vis.root, P.vis.rope); P.vis = null; }
+    if (!P.vis) { P.vis = buildPeer(P); P.first = true; if (!P.vis) continue; }
+    const V = P.vis; V.root.visible = V.rope.visible = true;
+    // posición respecto a la barca (la misma barca para todos) suavizada entre mensajes
+    const td = peerTmp.d.set(st.dx, st.dy, st.dz), qq = peerTmp.q.set(st.q[0], st.q[1], st.q[2], st.q[3]).normalize();
+    if (P.first) { P.d.copy(td); P.q.copy(qq); P.first = false; }
+    P.d.lerp(td, clamp(dt * 10, 0, 1)); P.q.slerp(qq, clamp(dt * 12, 0, 1));
+    V.root.position.set(boat.position.x + P.d.x, P.d.y, boat.position.z + P.d.z); V.root.quaternion.copy(P.q);
+    V.root.updateMatrixWorld(true);
+    computePose(st.c, st.l, st.g || null, st.g ? 1 : 0, !!st.ho, st.rl || 0, st.sw ? -1 : 1);
+    poseHuman(V.h, J);
+    // la cuerda: de la torre de la Tatanka a las manos
+    peerTmp.tow.copy(BOAT.towLocal).applyMatrix4(boat.matrixWorld);
+    if (V.h.knuckL) { V.h.knuckL.getWorldPosition(peerTmp.hand); V.h.knuckR.getWorldPosition(peerTmp.a); peerTmp.hand.add(peerTmp.a).multiplyScalar(0.5); }
+    else peerTmp.hand.copy(V.root.position).add(V3(0, 1, 0));
+    if (!st.ho) peerTmp.hand.lerp(peerTmp.tow, 0.4).setY(0.1);
+    setRod(V.rope, 0.009, peerTmp.tow, peerTmp.hand);
+  }
+}
+
+// =====================================================================================
 //  BUCLE
 // =====================================================================================
 const GAME = { running: false, paused: false, t: 0 };
@@ -1735,6 +1844,7 @@ $('fsBtn').onclick = () => { const d = document.documentElement; if (document.fu
 try { const n = localStorage.getItem('wake-nick'); if (n) $('nick').value = n; } catch (e) {}
 $('nick').addEventListener('input', () => { try { localStorage.setItem('wake-nick', $('nick').value.trim()); } catch (e) {} });
 $('go').onclick = () => {
+  pickLane();
   $('menu').hidden = true; $('hud').hidden = false; GAME.running = true; getUp(); setCam(CAM.mode);
   if (IS_MOBILE) {
     const d = document.documentElement;
@@ -1792,11 +1902,14 @@ function frame() {
     GAME.t += dt;
     const t = GAME.t;
     U.uTime.value = t; skyMat.uniforms.uTime.value = t;
+    netSyncBoat(dt);
     updateBoat(dt, t);
     poseDriver(BOAT.turn || 0, t);
     updateRider(dt, t);
     updateSpray(dt);
     updateTrail(dt, t);
+    updatePeers(dt);
+    netSend(dt);
     $('speed').textContent = `${Math.round(BOAT.speed * 3.6)} KM/H · CUERDA ${ROPE.toFixed(0)} M`;
   }
   if (!window.__freeCam) updateCamera(dt);   // __freeCam: cámara libre para revisar el escenario
