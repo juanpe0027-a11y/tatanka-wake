@@ -896,12 +896,13 @@ const STICK_R = 56;
 const touches = new Map();
 function stickTouchStart(side, x, y) {
   const s = IN[side];
-  s.on = true; s.x = 0; s.y = 0; s.t0 = performance.now(); s.maxR = 0; s.ang = null; s.turn = 0;
+  s.on = true; s.x = 0; s.y = 0; s.t0 = performance.now(); s.maxR = 0; s.ang = null; s.turn = 0; s.circled = false;
   $(side === 'L' ? 'stL' : 'stR').classList.add('on');
 }
 function stickTouchEnd(side) {
   const s = IN[side];
   if (performance.now() - s.t0 < 240 && s.maxR < 0.45) s.tapEv = true;   // toque corto = «tap»
+  s.relEv = { x: s.x, y: s.y, circled: s.circled };                       // al soltar (el pop con el stick derecho)
   s.on = false; s.x = 0; s.y = 0; s.ang = null; s.turn = 0;
   $(side === 'L' ? 'stL' : 'stR').classList.remove('on');
 }
@@ -912,12 +913,12 @@ function trackCircle(s) {
     const a = Math.atan2(s.y, s.x);
     if (s.ang !== null) { let d = a - s.ang; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; s.turn += d; }
     s.ang = a;
-    if (Math.abs(s.turn) >= Math.PI * 0.92) { s.circleEv = Math.sign(s.turn); s.turn = 0; }
+    if (Math.abs(s.turn) >= Math.PI * 0.92) { s.circleEv = Math.sign(s.turn); s.turn = 0; s.circled = true; }
   } else if (r < 0.3) { s.ang = null; s.turn = 0; }
 }
 addEventListener('pointerdown', e => {
   if (!GAME.running || e.target.closest('button') || e.target.closest('#stance')) return;
-  const side = e.clientX < innerWidth / 2 ? 'R' : 'L';   // controles al revés: la dirección con la mano derecha
+  const side = e.clientX < innerWidth / 2 ? 'L' : 'R';   // izquierda = dirección, derecha = agacharse / saltar y giros
   for (const [, t] of touches) if (t.side === side) return;
   touches.set(e.pointerId, { side, x0: e.clientX, y0: e.clientY });
   stickTouchStart(side);
@@ -949,12 +950,14 @@ $('stance').addEventListener('click', () => { if (GAME.running) surface180(); })
 function readSticks() {
   if (!GAME.running) {   // intro: carvea solo, suave, sin saltar
     if (RIDER.state === 'fallen' && RIDER.fallT > 2) getUp();
-    return { L: { x: Math.sin(GAME.t * 0.32) > 0.2 ? 0.75 : Math.sin(GAME.t * 0.32) < -0.2 ? -0.75 : 0, y: 0, tap: false, circle: 0 }, R: { x: 0, y: 0, tap: false, circle: 0 } };
+    return { L: { x: Math.sin(GAME.t * 0.32) > 0.2 ? 0.75 : Math.sin(GAME.t * 0.32) < -0.2 ? -0.75 : 0, y: 0, tap: false, circle: 0 }, R: { x: 0, y: 0, tap: false, circle: 0, hold: false, rel: null } };
   }
   const k = IN.kb, air = RIDER.state === 'air';
   const L = { x: IN.L.x, y: IN.L.y, tap: IN.L.tapEv, circle: IN.L.circleEv };
-  const R = { x: IN.R.x, y: IN.R.y, tap: IN.R.tapEv, circle: IN.R.circleEv };
-  IN.L.tapEv = IN.R.tapEv = false; IN.L.circleEv = IN.R.circleEv = 0;
+  const R = { x: IN.R.x, y: IN.R.y, tap: IN.R.tapEv, circle: IN.R.circleEv, hold: IN.R.on || !!k.Space, rel: IN.R.relEv || null };
+  IN.L.tapEv = IN.R.tapEv = false; IN.L.circleEv = IN.R.circleEv = 0; IN.L.relEv = IN.R.relEv = null;
+  // Espacio = el centro del stick derecho: mantener agacha, soltar salta
+  if (k.Space) prevSpace = true; else if (prevSpace) { prevSpace = false; R.rel = { x: 0, y: k.KeyR ? -1 : 0, circled: false }; }
   // Riding: ← → carvean (soltar la flecha = pop) · Espacio ollie. Grabs: G (+ flechas para el tweak), O la otra mano
   if (!air) { if (k.ArrowLeft) L.x = -1; if (k.ArrowRight) L.x = 1; }
   if (air && k.KeyG) {
@@ -962,8 +965,6 @@ function readSticks() {
     if (k.ArrowUp) { L.y = 1; L.x = 0; } if (k.ArrowDown) { L.y = -1; L.x = 0; }
     if (k.ArrowLeft) { L.x = -1; L.y = 0; } if (k.ArrowRight) { L.x = 1; L.y = 0; }
   }
-  if (k.Space) L.y = -1;
-  if (RIDER.spaceFlick > 0) L.y = 1;
   if (k.KeyW) R.y = 1; if (k.KeyS) R.y = -1; if (k.KeyA) R.x = -1; if (k.KeyD) R.x = 1;
   if (k.KeyR) { R.y = -1; R.x = 0; R.raleyKey = true; }
   if (IN.kbSBend) { R.circle = 1; IN.kbSBend = false; }
@@ -980,8 +981,8 @@ function stickSVG(words) {
     <text x="0" y="-41">${words[0]}</text><text x="44" y="4">${words[1]}</text><text x="0" y="49">${words[2]}</text><text x="-44" y="4">${words[3]}</text></svg>
     <i class="knob">${''}</i>`;
 }
-$('stL').innerHTML = stickSVG(['OLLIE', 'CARVE', '', 'CARVE']).replace('id="__land"', 'id="landL"').replace('<i class="knob"></i>', '<i class="knob">R</i>');   // el de la dirección va a la derecha
-$('stR').innerHTML = stickSVG(['SPIN', 'ROLL', 'SPIN', 'ROLL']).replace('id="__land"', 'id="landR"').replace('<i class="knob"></i>', '<i class="knob">L</i>');
+$('stL').innerHTML = stickSVG(['', 'CARVE', '', 'CARVE']).replace('id="__land"', 'id="landL"').replace('<i class="knob"></i>', '<i class="knob">L</i>');   // dirección
+$('stR').innerHTML = stickSVG(['SPIN', 'ROLL', 'SPIN', 'ROLL']).replace('id="__land"', 'id="landR"').replace('<i class="knob"></i>', '<i class="knob">OLLIE</i>');   // centro: agacharse y saltar
 function drawSticks(S) {
   for (const [id, s] of [['stL', S.L], ['stR', S.R]]) {
     const k = $(id).querySelector('.knob'); k.style.transform = `translate(${(s.x * 40).toFixed(1)}px, ${(-s.y * 40).toFixed(1)}px)`;
@@ -1045,6 +1046,21 @@ function travelScreenSign() {
 function surface180() {
   const R = RIDER; if (R.state !== 'ride') return;
   R.sw = !R.sw; R.yawAnim += Math.PI; say('Surface 180', '', 0.9);
+}
+
+// grind en la cresta de la estela: la tabla se cruza y resbala por el labio; cuanto más dura, más puntos
+function startGrind() {
+  const R = RIDER; if (R.state !== 'ride') return;
+  R.grind = { t: 0, dir: Math.sign(R.omega || 1) * (R.sw ? -1 : 1) };
+  say('WAKE GRIND', '', 0.9);
+}
+function endGrind() {
+  const R = RIDER, g = R.grind; if (!g) return; R.grind = null;
+  if (g.t < 0.25) return;
+  const rep = R.history['Wake Grind'] || 0; R.history['Wake Grind'] = rep + 1;
+  const pts = Math.round((120 + 320 * Math.min(g.t, 2.2)) * Math.pow(0.75, rep) / 10) * 10;
+  R.score += pts; $('score').textContent = R.score.toLocaleString('es-ES');
+  say(`Wake Grind<small>+${pts.toLocaleString('es-ES')}</small>`, '', 1.6);
 }
 
 function pop(q, kind, popPos) {
@@ -1212,7 +1228,8 @@ function updateRider(dt, t) {
   if (R.bangerOn) { R.banger -= dt * 0.025; if (R.banger < 0.75) { R.bangerOn = false; } updateMeters(); }
   // --- horizontal: la cuerda manda (péndulo detrás de la barca)
   if (R.state !== 'fallen') {
-    if (R.state === 'ride' || R.state === 'start') {
+    if (R.grind) R.omega *= Math.max(0, 1 - dt * 7);
+    else if (R.state === 'ride' || R.state === 'start') {
       const c = R.state === 'start' ? 0 : S.L.x;          // solo cuenta lo lateral
       // el stick va según la pantalla: a la derecha = hacia la derecha de la cámara (en cualquier pie)
       const d = trailDir(tmp.n); tmp.c.set(1, 0, 0).applyQuaternion(camera.quaternion);
@@ -1238,35 +1255,46 @@ function updateRider(dt, t) {
   } else if (R.state === 'ride') {
     R.y = lerp(R.y, sH, clamp(dt * 14, 0, 1));
     // --- en el agua: tap R arma Flip/Raley, círculo con R = mano envuelta, círculo con L = surface 180, tap L = la otra mano
-    if (S.R.tap) { R.armed = !R.armed; }
     if (S.R.circle) { R.wrapped = R.wrapped && Math.sign(S.R.circle) !== R.wrapped ? 0 : S.R.circle; say(R.wrapped ? 'Handle wrapped' : 'Unwrapped', '', 0.9); }
     if (S.L.circle) surface180();
     if (S.L.tap || IN.kbOther) R.otherHand = !R.otherHand && !IN.kbOther ? true : (IN.kbOther ? true : false);
-    // --- pop: mantener L hacia la estela y soltar arriba del todo
-    const hold = Math.abs(S.L.x) > 0.5;
+    // --- pop: mantener el centro del stick derecho (se agacha) y soltarlo. En la cresta salta la estela, en plano es un ollie.
+    //     Soltarlo arrastrado abajo = raley, arriba (de talones) = whirly
+    const hold = S.R.hold;
     const onOuter = u > 0.94 && u < 1.75 && inward && A > 0.12, onInner = u > 0.5 && u < 1.08 && !inward && A > 0.12;
-    if (R.charging && !hold) {
-      if (onOuter) { const q = clamp(1 - (u - 1) / 0.75, 0, 1); pop(clamp(q, 0.2, 1), 'wake', 0.5 - 0.5 * (1 - q)); }
+    if (hold) R.ollieArm = Math.min(1, R.ollieArm + dt * 2.5);
+    if (S.R.rel && !S.R.rel.circled) {
+      R.armed = Math.abs(S.R.rel.y) > 0.5; S.R.y = S.R.rel.y;          // pop() mira hacia dónde se soltó
+      const q0 = clamp(R.ollieArm, 0.3, 1);
+      if (R.grind) { endGrind(); pop(0.85, 'wake', 0.5); }
+      else if (onOuter) { const q = clamp(1 - (u - 1) / 0.75, 0, 1); pop(clamp(q, 0.2, 1), 'wake', 0.5 - 0.5 * (1 - q)); }
       else if (onInner) { const q = clamp((u - 0.5) / 0.5, 0, 1); pop(clamp(q, 0.2, 1), 'wake', 0.5 - 0.5 * (1 - q)); }
       else if (R.lateWin > 0) { pop(R.lateQ, 'wake', 0.5 + 0.5 * (1 - R.lateQ)); }
+      else pop(q0, 'ollie');
+      R.ollieArm = 0; R.lateWin = 0;
+      if (R.state !== 'air') R.armed = false;
+    } else if (!hold) R.ollieArm = Math.max(0, R.ollieArm - dt * 3);
+    // --- grind: subir la cara de la estela y, antes de pasar la cresta, volver a bajar por el mismo lado
+    // (se nota en el stick: subiendo la cara se lleva hacia un lado; si se cambia al otro cerca de la cresta, grind)
+    const nearCrest = u > 0.75 && u < 1.3 && A > 0.15, stk = Math.abs(S.L.x) > 0.5 ? Math.sign(S.L.x) : 0;
+    if (R.state === 'ride' && !R.grind && R.climb && nearCrest && stk && stk !== R.climbStick && !hold) startGrind();
+    if (inward && u > 0.95 && u < 1.8) { R.climb = true; if (stk) R.climbStick = stk; }
+    else if (u > 1.8 || u < 0.75 || (!inward && !R.grind)) R.climb = false;
+    if (R.grind) {
+      const g = R.grind; g.t += dt;
+      R.y = sH + 0.03;
+      if (!nearCrest || g.t > 2.2 || (g.t > 0.5 && Math.abs(S.L.x) < 0.2)) { endGrind(); R.climb = false; }   // se acaba al soltar la dirección o al salir de la cresta
     }
     if (R.state === 'ride') {
       const crossed = (R.prevU - 1) * (u - 1) < 0 && A > 0.12;
       if (crossed && hold) { R.lateWin = 0.26; }
-      else if (crossed && Math.abs(dsdt) > 2.5 && !R.lateWin) { pop(0.15, 'hop'); }
+      else if (crossed && Math.abs(dsdt) > 2.5 && !R.lateWin && !R.grind) { pop(0.15, 'hop'); }
       if (R.lateWin > 0) {
         R.lateWin -= dt; R.lateQ = clamp(R.lateWin / 0.26, 0, 1) * 0.75;
-        if (R.lateWin <= 0 && hold && R.state === 'ride') { pop(0.12, 'hop', 1); say('NO RELEASE', '', 1); }
+        if (R.lateWin <= 0 && hold && R.state === 'ride') { pop(0.12, 'hop', 1); say('NO RELEASE', '', 1); R.ollieArm = 0; }
       }
     }
     R.charging = hold && R.state === 'ride';
-    // --- ollie en agua plana: tirar de L hacia abajo y subirlo de golpe
-    if (R.state === 'ride') {
-      if (S.L.y < -0.6) R.ollieArm = Math.min(1, R.ollieArm + dt * 2.5);
-      else if (S.L.y > 0.45 && R.ollieArm > 0.15 && u > 1.6 || S.L.y > 0.45 && R.ollieArm > 0.15 && u < 0.6) { pop(R.ollieArm, 'ollie'); R.ollieArm = 0; }
-      else if (S.L.y > -0.2) R.ollieArm = Math.max(0, R.ollieArm - dt * 3);
-    }
-    if (IN.kb.Space) prevSpace = true; else if (prevSpace) { prevSpace = false; RIDER.spaceFlick = 0.08; }
     R.crouch = lerp(R.crouch, 0.48 + R.ollieArm * 0.35 + (R.charging ? 0.12 : 0), clamp(dt * 6, 0, 1));
   } else if (R.state === 'air') {
     const a = R.air; a.t += dt;
@@ -1384,11 +1412,12 @@ function updateRider(dt, t) {
     R.edge = lerp(R.edge, lt * 0.5, clamp(dt * 4, 0, 1));
     R.lean = lerp(R.lean, lt * 0.95, clamp(dt * 4, 0, 1));
     surfaceNormal(R.pos.x, R.pos.z, t, tmp.n);
-    tmp.q.setFromAxisAngle(UP, R.yaw + R.yawAnim);
+    R.grindYaw = lerp(R.grindYaw || 0, R.grind ? R.grind.dir * 1.1 : 0, clamp(dt * 9, 0, 1));   // grind: la tabla cruzada sobre la cresta
+    tmp.q.setFromAxisAngle(UP, R.yaw + R.yawAnim + R.grindYaw);
     tmp.q2.setFromUnitVectors(UP, tmp.n);
     riderRoot.quaternion.copy(tmp.q2).multiply(tmp.q);
     riderRoot.rotateX(R.edge);
-    const sp = Math.abs(latV), n = Math.min(4, Math.floor(sp * 0.6 * dt * 60 * 0.25 + rnd()));
+    const sp = Math.abs(latV) + (R.grind ? 6 : 0), n = Math.min(R.grind ? 7 : 4, Math.floor(sp * 0.6 * dt * 60 * 0.25 + rnd()));
     for (let i = 0; i < n; i++) {
       tmp.a.set(rnd(-0.6, 0.6), 0.02, -Math.sign(latV) * 0.2).applyQuaternion(riderRoot.quaternion).add(riderRoot.position);
       emit(tmp.a.x, tmp.a.y, tmp.a.z, -tmp.c.x * latV * 0.35 + rnd(-0.6, 0.6), rnd(0.8, 1.8) + sp * 0.12, -tmp.c.z * latV * 0.35 + rnd(-0.6, 0.6), rnd(0.12, 0.28), rnd(0.4, 0.8));
