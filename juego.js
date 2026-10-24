@@ -1699,7 +1699,7 @@ async function loadModels() {
   // (cuando Rupert hace wake, conduce Senén)
   const hd = pat && setupHuman(pat), hs = sen && setupHuman({ scene: T.SkeletonUtils.clone(sen.scene) });
   for (const [n, h] of [['rupert', hd], ['senen', hs]]) if (h) { DRIVERS[n] = h; h.root.position.copy(DRIVER.at); h.root.visible = false; boat.add(h.root); }
-  setDriver(RIDER_NAME === 'rupert' ? 'senen' : 'rupert');
+  pickPatron();
   const ok = sen && tat && pat;
   $('loadLine').textContent = ok ? '✅ Barca y riders listos' : '⚠️ No se han podido cargar todos los modelos: recarga la página';
   $('go').disabled = !ok && !sen;
@@ -1707,8 +1707,13 @@ async function loadModels() {
   // Rupert de rider: se baja mientras tanto (si lo eligen antes, sigue Senén hasta que llega)
   const rup = await new Promise(res => loader.load('rupert.glb' + v, res, undefined, () => res(null)));
   const h = rup && setupHuman(rup); if (h) { RIDERS.rupert = h; if (RIDER_NAME === 'rupert') setRider('rupert'); }
+  pickPatron();
   const om = await new Promise(res => loader.load('omar.glb?v=5', res, undefined, () => res(null)));
   const ho = om && setupHuman(om); if (ho) { RIDERS.omar = ho; if (RIDER_NAME === 'omar') setRider('omar'); }
+  pickPatron();
+  const jp = await new Promise(res => loader.load('juanp.glb?v=1', res, undefined, () => res(null)));
+  const hj = jp && setupHuman(jp); if (hj) { RIDERS.juanp = hj; if (RIDER_NAME === 'juanp') setRider('juanp'); }
+  pickPatron();
   READY.extras = true;
 }
 // mientras cargan no se enseñan ni el maniquí ni la barca provisional: se ve el Pantalán
@@ -1716,6 +1721,21 @@ const READY = { on: false, t: 0, shots: false };
 function showModels() { READY.on = true; for (const o of [riderRoot, rope, handleMesh, boat]) o.visible = true; }
 for (const o of [riderRoot, rope, handleMesh, boat]) o.visible = false;
 const RIDERS = {}, DRIVERS = {}; let RIDER_NAME = 'senen';
+const ALL_PJ = ['rupert', 'senen', 'omar', 'juanp'];
+let PATRON = 'rupert'; try { PATRON = localStorage.getItem('wake-patron') || 'rupert'; } catch (e) {}
+function makeDriver(n) {
+  if (DRIVERS[n]) return DRIVERS[n];
+  const src = RIDERS[n]; if (!src) return null;
+  const h = setupHuman({ scene: T.SkeletonUtils.clone(src.sc) }); if (!h) return null;
+  DRIVERS[n] = h; h.root.position.copy(DRIVER.at); h.root.visible = false; boat.add(h.root); return h;
+}
+function pickPatron() {
+  let n = PATRON;
+  if (n === RIDER_NAME || !makeDriver(n)) n = ALL_PJ.find(k => k !== RIDER_NAME && makeDriver(k)) || n;
+  setDriver(n);
+  if (typeof RIDER_INFO !== 'undefined' && RIDER_INFO[n]) $('riderSub').textContent = 'Patrón: ' + RIDER_INFO[n][0] + ' · Barca Tatanka';
+  document.querySelectorAll('#patrons .opt').forEach(b => { b.classList.toggle('sel', b.dataset.p === n); b.disabled = b.dataset.p === RIDER_NAME; });
+}
 function setDriver(n) { for (const k in DRIVERS) DRIVERS[k].root.visible = k === n; DRIVER.h = DRIVERS[n] || null; }
 function setRider(name) {
   RIDER_NAME = name;
@@ -2021,6 +2041,23 @@ if (!document.querySelector('#riders .opt[data-r="omar"]')) {
   c.querySelector('b').textContent = 'Omar'; c.querySelector('em').textContent = 'Neopreno Billabong · tatuaje en el tobillo';
   $('riders').appendChild(c);
 }
+if (!document.querySelector('#riders .opt[data-r="juanp"]')) {
+  const c = document.querySelector('#riders .opt[data-r="rupert"]').cloneNode(true); c.dataset.r = 'juanp'; c.classList.remove('sel');
+  c.querySelector('.portrait').style.backgroundImage = 'url(avatar-juanp.jpg)'; c.querySelector('.face').style.backgroundImage = 'url(avatar-juanp.jpg)';
+  c.querySelector('b').textContent = 'JuanP'; c.querySelector('em').textContent = 'Neopreno corto · faro y onda tatuados';
+  $('riders').appendChild(c);
+}
+if (!$('patrons')) {
+  const t = document.createElement('div'); t.className = 'ptitle'; t.style.fontSize = '30px'; t.textContent = 'Patrón';
+  const g = document.createElement('div'); g.className = 'cards'; g.id = 'patrons'; g.style.gridTemplateColumns = 'repeat(4, minmax(0, 1fr))';
+  for (const [k, nm, av] of [['rupert', 'Rupert', 'avatar-rupert.jpg'], ['senen', 'Senén', 'avatar.jpg'], ['omar', 'Omar', 'avatar-omar.jpg'], ['juanp', 'JuanP', 'avatar-juanp.jpg']]) {
+    const b = document.createElement('button'); b.className = 'opt card'; b.dataset.p = k;
+    b.innerHTML = `<span class="portrait" style="aspect-ratio:1;background-image:url(${av})"></span><b style="font-size:16px">${nm}</b>`;
+    g.appendChild(b);
+  }
+  const tabla = $('boards').previousElementSibling; tabla.before(t, g);
+  const sub = document.querySelector('#pChars .psub'); if (sub) sub.textContent = 'Elige quién hace wake y quién lleva la barca';
+}
 if (!document.querySelector('#boards .opt[data-b="3"]')) {
   const c = document.querySelector('#boards .opt[data-b="2"]').cloneNode(true); c.dataset.b = '3'; c.classList.remove('sel');
   c.querySelector('b').textContent = 'Blanca'; c.querySelector('em').textContent = 'Camuflaje gris';
@@ -2028,15 +2065,18 @@ if (!document.querySelector('#boards .opt[data-b="3"]')) {
 }
 document.querySelectorAll('#boards .opt').forEach(b => b.onclick = () => { document.querySelectorAll('#boards .opt').forEach(x => x.classList.remove('sel')); b.classList.add('sel'); setBoard(+b.dataset.b); });
 document.querySelectorAll('#cams .opt').forEach(b => b.onclick = () => setCam(+b.dataset.c));
-const RIDER_INFO = { senen: ['Senén', 'avatar.jpg', 0], rupert: ['Rupert', 'avatar-rupert.jpg', 2], omar: ['Omar', 'avatar-omar.jpg', 3] };
+const RIDER_INFO = { senen: ['Senén', 'avatar.jpg', 0], rupert: ['Rupert', 'avatar-rupert.jpg', 2], omar: ['Omar', 'avatar-omar.jpg', 3], juanp: ['JuanP', 'avatar-juanp.jpg', 1] };
 document.querySelectorAll('#riders .opt').forEach(b => b.onclick = () => {
   document.querySelectorAll('#riders .opt').forEach(x => x.classList.remove('sel')); b.classList.add('sel');
   const [name, av, board] = RIDER_INFO[b.dataset.r];
   setRider(b.dataset.r); $('riderName').textContent = name; $('avatar').style.backgroundImage = `url(${av})`;
-  $('riderSub').textContent = 'Patrón: ' + (b.dataset.r === 'rupert' ? 'Senén' : 'Rupert') + ' · Barca Tatanka';
   try { localStorage.setItem('wake-rider', b.dataset.r); } catch (e) {}
   document.querySelector(`#boards .opt[data-b="${board}"]`).click();
-  setDriver(b.dataset.r === 'rupert' ? 'senen' : 'rupert');
+  pickPatron();
+});
+document.querySelectorAll('#patrons .opt').forEach(b => b.onclick = () => {
+  PATRON = b.dataset.p; try { localStorage.setItem('wake-patron', PATRON); } catch (e) {}
+  pickPatron();
 });
 function showPanel(id) { for (const p of ['pMain', 'pChars', 'pControls', 'pStats']) if ($(p)) $(p).hidden = p !== id; }
 $('toChars').onclick = () => showPanel('pChars'); $('charsOk').onclick = () => showPanel('pMain');
@@ -2094,7 +2134,7 @@ function boardShots() {
 function riderShots() {
   const cam = new T.PerspectiveCamera(34, 0.8, 0.1, 3000), keep = RIDER_NAME, rp = riderRoot.position;
   const toBoat = V3().subVectors(towW, rp).setY(0).normalize();
-  for (const name of ['senen', 'rupert', 'omar']) {
+  for (const name of ['senen', 'rupert', 'omar', 'juanp']) {
     if (!RIDERS[name]) continue;
     setRider(name); poseBody(J); riderRoot.updateMatrixWorld(true);
     cam.position.copy(rp).addScaledVector(CAM.chest, 2.5).addScaledVector(toBoat, 1.2).add(V3(0, 1.15, 0));
