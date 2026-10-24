@@ -1203,12 +1203,14 @@ function land() {
   const deg = Math.abs(halfTurns) * 180;
   if (a.kind === 'hop' && !flips && !halfTurns && !a.grabFirst) { R.state = 'ride'; R.vy = 0; R.air = null; return; }   // un bote sin truco no puntúa
   const name = trickName(a, halfTurns, flips, deg);
+  R.lastTrickName = name;
   const value = trickValue(a, halfTurns, flips);
   let pts = value * (0.7 + 0.3 * a.quality);
   if (result === 'sketchy') pts *= 0.9;                  // Sketchy: −10 %
   const rep = R.history[name] || 0; R.history[name] = rep + 1; pts *= Math.pow(0.75, rep);   // cada repetición vale el 75 %
   pts = Math.round(pts / 10) * 10;
   R.score += pts; $('score').textContent = R.score.toLocaleString('es-ES');
+  if (pts > (REC.bestTrickPts || 0)) { REC.bestTrickPts = pts; REC.bestTrick = name; }
   // Banger: los trucos de estela lo llenan (los difíciles más rápido, los ollies casi nada)
   if (a.kind === 'wake' || a.kind === 'ollie') R.banger = Math.min(1, R.banger + (a.kind === 'ollie' ? 0.02 : clamp(value / 2400, 0.05, 0.45)));
   if (R.banger >= 1 && !R.bangerOn) { R.bangerOn = true; msg('BANGER', 1.2); }
@@ -1243,6 +1245,7 @@ function updateRollers(dt) {
 
 function updateRider(dt, t) {
   const R = RIDER, S = readSticks(); R.lastS = S;
+  if (NET.pendingFall) { const why = NET.pendingFall; NET.pendingFall = null; pushFall(why); }   // empujón (se aplica al empezar el fotograma)
   drawSticks(S);
   R.prevPos.copy(R.pos);
   if (R.bangerOn) { R.banger -= dt * 0.025; if (R.banger < 0.75) { R.bangerOn = false; } updateMeters(); }
@@ -1327,6 +1330,8 @@ function updateRider(dt, t) {
     R.crouch = lerp(R.crouch, 0.48 + R.ollieArm * 0.35 + (R.charging ? 0.12 : 0), clamp(dt * 6, 0, 1));
   } else if (R.state === 'air') {
     const a = R.air; a.t += dt;
+    // empujón: si en el aire te cruzas con otro rider que también salta, el OLLIE se pone rojo («EMPUJAR»)
+    if (NET.pushTarget && S.R.rel && Math.hypot(S.R.rel.x, S.R.rel.y) < 0.35) doPush(NET.pushTarget);
     R.vy -= 9.8 * dt; R.y += R.vy * dt;
     const fast = R.bangerOn ? 1.25 : 1;
     const rx = S.R.x, ry = S.R.y, rr = Math.hypot(rx, ry);
@@ -1520,8 +1525,8 @@ function updateBoat(dt, t) {
 // =====================================================================================
 //  CÁMARAS
 // =====================================================================================
-const CAM = { mode: 0, pos: V3(0, 5, 0), look: V3(), names: ['DETRÁS', 'BAJA', 'DESDE LA BARCA', 'LATERAL'] };
-function nextCam() { setCam((CAM.mode + 1) % 4); msg('CÁMARA: ' + CAM.names[CAM.mode], 1.2); }
+const CAM = { mode: 0, pos: V3(0, 5, 0), look: V3(), names: ['DETRÁS', 'BAJA', 'DESDE LA BARCA', 'LATERAL', 'TODOS'] };
+function nextCam() { setCam((CAM.mode + 1) % CAM.names.length); msg('CÁMARA: ' + CAM.names[CAM.mode], 1.2); }
 function setCam(i) { CAM.mode = i; document.querySelectorAll('#cams .opt').forEach(b => b.classList.toggle('sel', +b.dataset.c === i)); }
 function updateCamera(dt) {
   const R = RIDER, rp = riderRoot.position;
@@ -1537,6 +1542,14 @@ function updateCamera(dt) {
   if (CAM.mode === 0) { want.copy(rp).addScaledVector(toBoat, -7.2 * far).add(V3(0, 3.2 * far, 0)).addScaledVector(CAM.chest, portrait ? 1.2 : 2.8); look.copy(rp).addScaledVector(toBoat, 5).setY(1.1); }
   else if (CAM.mode === 1) { want.copy(rp).addScaledVector(toBoat, -4.6 * far).add(V3(0, 1.4 * far, 0)).addScaledVector(side, portrait ? 0.5 : 1.2); look.copy(rp).addScaledVector(toBoat, 4).setY(1.0); }
   else if (CAM.mode === 2) { want.copy(towW).add(V3(0, 0.4, 0)).addScaledVector(toBoat, 0.6); look.copy(rp).setY(rp.y + 0.9); }
+  else if (CAM.mode === 4) {   // TODOS: alta, detrás del rider con la cuerda más larga, para ver a toda la sala y la barca
+    const back = Math.max(ROPE, ...Object.values(NET.peers).filter(P => P.st && P.st.p).map(P => ROPES[P.st.ln] || ROPE));
+    const bh = tmp.p2b = (tmp.p2b || V3()).set(boatVel.x, 0, boatVel.z).normalize();
+    want.copy(boat.position).addScaledVector(bh, -(back + 13 * far)).setY(8.5 * far);
+    look.copy(boat.position).addScaledVector(bh, -back * 0.5).setY(0.5);
+    CAM.off = null; CAM.lookOff = null; CAM.pos.lerp(want, clamp(dt * 3, 0, 1)); CAM.look.lerp(look, clamp(dt * 4, 0, 1));
+    camera.position.copy(CAM.pos); camera.lookAt(CAM.look); return;
+  }
   else { want.copy(rp).addScaledVector(side, -9 * far).addScaledVector(toBoat, 2).add(V3(0, 2.0, 0)); look.copy(rp).setY(rp.y + 0.9); }
   if (R.state === 'air' && CAM.mode !== 2) { want.y += R.y * 0.45; look.y += R.y * 0.6; }
   // se suaviza la posición RELATIVA al rider: así va siempre centrado aunque cruce rápido de un lado a otro
@@ -1722,7 +1735,7 @@ function poseDriver(turn, t) {
 //  (Firebase: el mismo proyecto que el surf; sala «wake-pantalan»)
 // =====================================================================================
 const FIREBASE_CONFIG = { apiKey: 'AIzaSyBYEgJnEQxYbgT97giPRuTaRNd5d9vF8tg', authDomain: 'surf-sagunto.firebaseapp.com', databaseURL: 'https://surf-sagunto-default-rtdb.europe-west1.firebasedatabase.app', projectId: 'surf-sagunto', storageBucket: 'surf-sagunto.firebasestorage.app', messagingSenderId: '669179228796', appId: '1:669179228796:web:1e39377632d94fa1c50ff9' };
-const ROPES = [22.9, 18.3, 27.4, 15.2, 30.5, 12.2];   // 75, 60, 90, 50, 100 y 40 pies
+const ROPES = [22.9, 20.7, 25.1, 18.5, 27.3, 16.3];   // cuerdas cerca unas de otras (2 m de diferencia) pero sin tocarse
 const NET = { db: null, me: null, id: 'w' + Math.random().toString(36).slice(2, 10), peers: {}, offset: 0, connected: false, sendT: 0, lane: 0, laneLocked: false };
 const netNow = () => Date.now() + NET.offset;
 function loadScript(src) { return new Promise((res, rej) => { const e = document.createElement('script'); e.src = src; e.onload = res; e.onerror = rej; document.head.appendChild(e); }); }
@@ -1731,13 +1744,15 @@ function loadScript(src) { return new Promise((res, rej) => { const e = document
   try {
     if (!window.firebase) { await loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js'); await loadScript('https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js'); }
     firebase.initializeApp(FIREBASE_CONFIG); NET.db = firebase.database();
-    NET.base = NET.db.ref('salas/wake-pantalan'); NET.me = NET.base.child('players/' + NET.id);
+    NET.base = NET.db.ref('salas/wake-tatanka'); NET.me = NET.base.child('players/' + NET.id);
     NET.db.ref('.info/serverTimeOffset').on('value', v => { NET.offset = v.val() || 0; });
     NET.db.ref('.info/connected').on('value', v => { NET.connected = !!v.val(); if (NET.connected) { NET.me.onDisconnect().remove(); NET.sendT = 0; } netMenu(); });
     const pl = NET.base.child('players');
     pl.on('child_added', v => peerData(v.key, v.val())); pl.on('child_changed', v => peerData(v.key, v.val())); pl.on('child_removed', v => peerGone(v.key));
+    NET.base.child('msgs').orderByChild('at').startAt(Date.now() - 5000).on('child_added', v => onNetMsg(v.val()));
+    recLoad();
     addEventListener('pagehide', () => { try { NET.me.remove(); } catch (e) {} });
-    mp.textContent = '🌊 Conectando a la sala del Pantalán…';
+    mp.textContent = '🌊 Conectando a la sala Tatanka…';
   } catch (e) { mp.textContent = '🌊 Sin conexión: juegas solo'; }
 })();
 function peerData(id, v) {
@@ -1756,7 +1771,7 @@ function pickLane() {
 function netMenu() {
   const ps = Object.values(NET.peers).filter(P => P.st);
   const names = ps.map(P => (P.st.n || 'Rider') + (P.st.p ? '' : ' (en el menú)'));
-  if (NET.connected) $('mpMenu').textContent = ps.length ? `🌊 Sala del Pantalán · ${ps.length + 1} conectados: tú, ${names.join(', ')}` : '🌊 Sala del Pantalán · de momento solo tú (pasa el enlace a tus amigos)';
+  if (NET.connected) $('mpMenu').textContent = ps.length ? `🌊 Sala Tatanka · ${ps.length + 1} conectados: tú, ${names.join(', ')}` : '🌊 Sala Tatanka · de momento solo tú (pasa el enlace a tus amigos)';
   // marcador en el juego
   let box = $('mpList');
   if (!box) { box = document.createElement('div'); box.id = 'mpList'; box.style.cssText = 'position:absolute;right:max(14px,env(safe-area-inset-right));top:74px;text-align:right;font:700 12px/1.45 system-ui,sans-serif;letter-spacing:.04em;text-shadow:0 1px 4px rgba(0,0,0,.7);pointer-events:none'; $('hud').appendChild(box); }
@@ -1780,9 +1795,165 @@ function netSend(dt) {
   const st = {
     n: ($('nick').value.trim() || RIDER_INFO[RIDER_NAME][0]).slice(0, 16), b: boardIdx, p: GAME.running ? 1 : 0, ln: NET.lane, s: R.score,
     dx: r2(rp.x - boat.position.x), dy: r2(rp.y), dz: r2(rp.z - boat.position.z), q: [r3(q.x), r3(q.y), r3(q.z), r3(q.w)],
+    a: R.state === 'air' ? 1 : 0, v: r2(R.state === 'air' ? Math.hypot(R.vel.x, R.vy, R.vel.z) : 0),
     c: r2(R.crouch), l: r2(R.state === 'air' ? 0 : R.lean), g: gp, rl: r2(a ? a.raley : 0), sw: R.sw ? 1 : 0, ho: R.state !== 'fallen' ? 1 : 0,
   };
   NET.me.set({ ch: RIDER_NAME, st }).catch(() => {});
+}
+
+// ---- EMPUJONES EN EL AIRE: gana el que va más rápido; el otro se suelta de la cuerda y cae mal al agua
+{ const st = document.createElement('style'); st.textContent = `
+  #stR.push svg .rim { stroke: #ff3b30; fill: rgba(255,59,48,.25); stroke-width: 3; }
+  #stR.push .knob { background: rgba(255,59,48,.85) !important; border-color: #fff !important; color: #fff; font-size: 9px !important; }
+  .rec { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; font-size: 16px; align-items: center; background: rgba(13,22,32,.62); padding: 12px 14px; }
+  .rec b { font-weight: 700; } .rec small { opacity: .7; font-size: 12px; } .rec .pts { text-align: right; font-weight: 700; }`;
+  document.head.appendChild(st); }
+function checkPush() {
+  NET.pushTarget = null;
+  if (RIDER.state !== 'air') return;
+  const rp = riderRoot.position;
+  for (const id in NET.peers) {
+    const P = NET.peers[id]; if (!P.vis || !P.vis.root.visible || !P.st || !P.st.a) continue;
+    const q = P.vis.root.position;
+    if (Math.hypot(q.x - rp.x, q.z - rp.z) < 3.2 && Math.abs(q.y - rp.y) < 2.2) { NET.pushTarget = id; break; }
+  }
+}
+function doPush(id) {
+  const P = NET.peers[id]; if (!P || !NET.base) return;
+  NET.pushTarget = null;
+  const R = RIDER, mine = Math.hypot(R.vel.x, R.vy, R.vel.z), his = P.st.v || 0, win = mine >= his;
+  const ref = NET.base.child('msgs').push();
+  ref.set({ ev: 'push', to: id, at: netNow(), from: NET.id, fn: ($('nick').value.trim() || RIDER_INFO[RIDER_NAME][0]).slice(0, 16), w: win ? 1 : 0 }).catch(() => {});
+  setTimeout(() => ref.remove().catch(() => {}), 15000);
+  if (win) { pushWon(P.st.n || 'Rider'); }
+  else { REC.pushLost = (REC.pushLost || 0) + 1; NET.pendingFall = (P.st.n || 'Rider') + ' iba más rápido'; }
+}
+function pushWon(name) {
+  const R = RIDER, pts = 500; R.score += pts; $('score').textContent = R.score.toLocaleString('es-ES');
+  REC.pushWon = (REC.pushWon || 0) + 1;
+  say(`¡EMPUJÓN!<small>${esc(name)} al agua · +${pts}</small>`, '', 2);
+}
+function pushFall(reason) {
+  const R = RIDER; if (R.state === 'fallen') return;
+  R.air = null; fall('¡EMPUJADO! ' + reason);
+  R.fallSpin = (Math.random() < 0.5 ? -1 : 1) * 6;               // cae mal: dando vueltas
+  R.fallVel.y = 0; R.fallVel.multiplyScalar(1.4);
+}
+function onNetMsg(m) {
+  if (m && m.au) { onVoice(m); return; }
+  if (!m || m.ev !== 'push' || m.to !== NET.id || netNow() - m.at > 5000) return;
+  if (m.w) { REC.pushLost = (REC.pushLost || 0) + 1; NET.pendingFall = 'por ' + (m.fn || 'otro rider'); }
+  else pushWon(m.fn || 'otro rider');
+}
+// el botón rojo mientras se puede empujar
+function drawPushBtn() {
+  const on = !!NET.pushTarget, el = $('stR'), k = el.querySelector('.knob');
+  if (el.classList.contains('push') !== on) { el.classList.toggle('push', on); k.textContent = on ? 'EMPUJAR' : 'OLLIE'; }
+}
+
+// ---- RÉCORDS: se guardan en la sala «wake-records» (uno por móvil, sin cuenta) y salen en el menú
+const REC = { dev: (() => { try { let d = localStorage.getItem('wake-dev'); if (!d) { d = 'd' + Math.random().toString(36).slice(2, 12); localStorage.setItem('wake-dev', d); } return d; } catch (e) { return 'd' + Math.random().toString(36).slice(2, 12); } })(),
+  data: null, saveT: 0, lastScore: 0, pushWon: 0, pushLost: 0, bestTrick: '', bestTrickPts: 0 };
+function recLoad() {
+  if (!NET.base) return;
+  const ref = NET.db.ref('salas/wake-records/players');
+  ref.child(REC.dev).once('value', v => { REC.data = (v.val() && v.val().st) || null; recShow(); });
+  ref.on('value', v => { REC.all = v.val() || {}; recShow(); });
+}
+function recSave() {
+  if (!NET.db || !GAME.running) return;
+  const d = REC.data || { best: 0, total: 0, pw: 0, pl: 0, bt: '', btp: 0, ses: 0 }, R = RIDER;
+  const add = Math.max(0, R.score - REC.lastScore); REC.lastScore = R.score;
+  const n = {
+    nm: ($('nick').value.trim() || RIDER_INFO[RIDER_NAME][0]).slice(0, 16), best: Math.max(d.best || 0, R.score), total: (d.total || 0) + add,
+    pw: (d.pw || 0) + REC.pushWon, pl: (d.pl || 0) + REC.pushLost, ses: d.ses || 0,
+    bt: REC.bestTrickPts > (d.btp || 0) ? REC.bestTrick : (d.bt || ''), btp: Math.max(d.btp || 0, REC.bestTrickPts), r: RIDER_NAME, at: netNow(),
+  };
+  if (!REC.counted) { REC.counted = true; n.ses = (d.ses || 0) + 1; }
+  REC.pushWon = 0; REC.pushLost = 0; REC.data = n;
+  NET.db.ref('salas/wake-records/players/' + REC.dev).set({ ch: n.nm.slice(0, 19), st: n }).catch(() => {});
+}
+function recTick(dt) { REC.saveT -= dt; if (REC.saveT <= 0) { REC.saveT = 10; recSave(); } }
+addEventListener('pagehide', () => { try { recSave(); } catch (e) {} });
+document.addEventListener('visibilitychange', () => { if (document.hidden) try { recSave(); } catch (e) {} });
+// el panel de récords del menú (se crea aquí para no depender del index.html guardado en el móvil)
+(function recPanel() {
+  const btn = document.createElement('button'); btn.className = 'mbtn'; btn.id = 'toStats'; btn.textContent = 'Récords';
+  $('toControls').before(btn);
+  const pn = document.createElement('div'); pn.className = 'panel wide'; pn.id = 'pStats'; pn.hidden = true;
+  pn.innerHTML = `<div class="ptitle">Récords</div><div class="rec" id="recMine"></div>
+    <div class="ptitle" style="font-size:28px;margin-top:6px">Ranking Tatanka</div><div class="rec" id="recAll"></div>
+    <button class="btn" id="statsOk">Volver</button>`;
+  $('pControls').after(pn);
+  btn.onclick = () => { showPanel('pStats'); recShow(); };
+  $('statsOk').onclick = () => showPanel('pMain');
+})();
+function recShow() {
+  const d = REC.data, fmt = v => (v || 0).toLocaleString('es-ES');
+  const mine = $('recMine'); if (!mine) return;
+  mine.innerHTML = d ? `<b>Mejor sesión</b><span>${fmt(d.best)} puntos</span><b>Puntos en total</b><span>${fmt(d.total)}</span>
+    <b>Mejor truco</b><span>${d.bt ? esc(d.bt) + ' · ' + fmt(d.btp) : '—'}</span><b>Empujones</b><span>${fmt(d.pw)} ganados · ${fmt(d.pl)} al agua</span><b>Sesiones</b><span>${fmt(d.ses)}</span>`
+    : '<b>Aún nada</b><span>Sal a navegar: tus récords se guardan solos</span>';
+  const list = Object.entries(REC.all || {}).map(([k, v]) => ({ me: k === REC.dev, ...(v.st || {}) })).filter(v => v.best > 0).sort((a, b) => b.best - a.best).slice(0, 10);
+  $('recAll').innerHTML = list.length ? list.map((v, i) => `<span><b>${i + 1}. ${esc(v.nm || 'Rider')}${v.me ? ' (tú)' : ''}</b>${v.bt ? '<br><small>' + esc(v.bt) + '</small>' : ''}</span><span class="pts">${fmt(v.best)}</span>`).join('') : '<b>Vacío</b><span>Sé el primero</span>';
+}
+
+// ---- NOTAS DE VOZ (como en el surf): mantener pulsado 🎤, hablar y soltar (máx. 8 s). Las oyen todos los de la sala
+$('place').textContent = 'TATANKA · PUERTO DE SAGUNTO';
+const voiceEl = document.createElement('audio'); voiceEl.setAttribute('playsinline', ''); document.body.appendChild(voiceEl);
+const micBtn = document.createElement('button'); micBtn.id = 'bMic'; micBtn.textContent = '🎤'; micBtn.setAttribute('aria-label', 'Mantén pulsado para grabar una nota de voz');
+$('bCam').after(micBtn);
+{ const st = document.createElement('style'); st.textContent = `
+  #bMic.rec { background: #ff5a4e !important; border-color: #fff !important; animation: micpulse .45s ease-in-out infinite alternate; }
+  @keyframes micpulse { from { transform: scale(1); } to { transform: scale(1.15); } }
+  #voiceLog { position: absolute; left: 50%; top: 92px; transform: translateX(-50%); font: 700 13px system-ui, sans-serif; text-shadow: 0 1px 4px rgba(0,0,0,.8); pointer-events: none; text-align: center; }
+  #voiceLog div { transition: opacity .6s; } #voiceLog div.old { opacity: 0; }`; document.head.appendChild(st); }
+const voiceLog = document.createElement('div'); voiceLog.id = 'voiceLog'; $('hud').appendChild(voiceLog);
+function logVoice(text) {
+  const d = document.createElement('div'); d.textContent = text; voiceLog.prepend(d);
+  while (voiceLog.children.length > 3) voiceLog.lastChild.remove();
+  setTimeout(() => d.classList.add('old'), 6000); setTimeout(() => d.remove(), 7000);
+}
+let recV = null, recChunks = [], recTimer = 0, micStream = null, recMime = '';
+function unlockVoice() { try { voiceEl.muted = true; const p = voiceEl.play(); if (p && p.then) p.then(() => { voiceEl.pause(); voiceEl.muted = false; }).catch(() => { voiceEl.muted = false; }); } catch (e) {} }
+addEventListener('pointerdown', unlockVoice, { once: true, capture: true });
+async function startRec(e) {
+  e.preventDefault(); e.stopPropagation();
+  if (recV) return;
+  if (!NET.base) { logVoice('Sin conexión a la sala'); return; }
+  if (!navigator.mediaDevices || !window.MediaRecorder) { logVoice('Este navegador no deja grabar audio'); return; }
+  try { if (!micStream) micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+  catch (err) { logVoice('Sin permiso para el micrófono'); return; }
+  recMime = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+  recChunks = [];
+  recV = new MediaRecorder(micStream, recMime ? { mimeType: recMime, audioBitsPerSecond: 32000 } : undefined);
+  recV.ondataavailable = ev => { if (ev.data && ev.data.size) recChunks.push(ev.data); };
+  recV.onstop = () => {
+    const blob = new Blob(recChunks, { type: recV.mimeType || recMime || 'audio/webm' });
+    recV = null; micBtn.classList.remove('rec');
+    if (blob.size < 1500) return;                         // pulsación demasiado corta
+    if (blob.size > 280000) { logVoice('Nota de voz demasiado larga'); return; }
+    const fr = new FileReader();
+    fr.onload = () => {
+      const ref = NET.base.child('msgs').push();
+      ref.set({ au: String(fr.result), id: NET.id, nm: ($('nick').value.trim() || RIDER_INFO[RIDER_NAME][0]).slice(0, 16), at: firebase.database.ServerValue.TIMESTAMP })
+        .then(() => logVoice('🎤 Tu nota de voz, enviada')).catch(() => logVoice('No se ha podido enviar'));
+      setTimeout(() => ref.remove().catch(() => {}), 60000);   // se borra al minuto
+    };
+    fr.readAsDataURL(blob);
+  };
+  recV.start(); micBtn.classList.add('rec');
+  clearTimeout(recTimer); recTimer = setTimeout(stopRec, 8000);
+}
+function stopRec() { clearTimeout(recTimer); if (recV && recV.state === 'recording') recV.stop(); }
+micBtn.addEventListener('pointerdown', startRec);
+micBtn.addEventListener('pointerup', stopRec); micBtn.addEventListener('pointercancel', stopRec); micBtn.addEventListener('pointerleave', stopRec);
+micBtn.addEventListener('contextmenu', e => e.preventDefault());
+function onVoice(m) {
+  if (m.id === NET.id || typeof m.au !== 'string' || !/^data:audio\/[a-z0-9.+;=-]+;base64,/i.test(m.au)) return;
+  if (typeof m.at === 'number' && netNow() - m.at > 15000) return;
+  logVoice('🔊 ' + (m.nm || 'Rider'));
+  try { voiceEl.src = m.au; voiceEl.volume = 1; const pr = voiceEl.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {}
 }
 function makeLabel(text) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64; const x = c.getContext('2d');
@@ -1843,10 +2014,10 @@ document.querySelectorAll('#riders .opt').forEach(b => b.onclick = () => {
   document.querySelector(`#boards .opt[data-b="${board}"]`).click();
   setDriver(b.dataset.r === 'rupert' ? 'senen' : 'rupert');
 });
-function showPanel(id) { for (const p of ['pMain', 'pChars', 'pControls']) $(p).hidden = p !== id; }
+function showPanel(id) { for (const p of ['pMain', 'pChars', 'pControls', 'pStats']) if ($(p)) $(p).hidden = p !== id; }
 $('toChars').onclick = () => showPanel('pChars'); $('charsOk').onclick = () => showPanel('pMain');
 $('toControls').onclick = () => showPanel('pControls'); $('controlsOk').onclick = () => showPanel('pMain');
-$('camBtn').onclick = () => { setCam((CAM.mode + 1) % 4); $('camBtn').textContent = 'Cámara: ' + CAM.names[CAM.mode].toLowerCase(); };
+$('camBtn').onclick = () => { setCam((CAM.mode + 1) % CAM.names.length); $('camBtn').textContent = 'Cámara: ' + CAM.names[CAM.mode].toLowerCase(); };
 // en el móvil se pone en pantalla completa sola al primer toque (el navegador no deja hacerlo sin tocar)
 function autoFullscreen(e) {
   const d = document.documentElement;
@@ -1925,7 +2096,9 @@ function frame() {
     updateSpray(dt);
     updateTrail(dt, t);
     updatePeers(dt);
+    checkPush(); drawPushBtn();
     netSend(dt);
+    if (GAME.running) recTick(dt);
     $('speed').textContent = `${Math.round(BOAT.speed * 3.6)} KM/H · CUERDA ${ROPE.toFixed(0)} M`;
   }
   if (!window.__freeCam) updateCamera(dt);   // __freeCam: cámara libre para revisar el escenario
