@@ -707,6 +707,15 @@ function makeBoardMesh(style) {
       c.beginPath(); c.moveTo(w, 0); c.lineTo(w * 0.8, 0); c.quadraticCurveTo(w * 0.72, h * 0.5, w * 0.82, h); c.lineTo(w, h); c.fill();
       c.strokeStyle = 'rgba(255,255,255,.85)'; c.lineWidth = 4; c.beginPath(); c.arc(w * 0.12, h * 0.5, 34, 0, TAU); c.stroke();
       c.fillStyle = 'rgba(255,255,255,.9)'; c.font = '800 30px Segoe UI, sans-serif'; c.fillText('LIQUID', w * 0.42, h * 0.56);
+    } else if (style === 3) {   // la de Omar: blanca con manchas grises de camuflaje gastado
+      c.fillStyle = '#eceae6'; c.fillRect(0, 0, w, h);
+      let sd = 7; const rr = () => (sd = (sd * 9301 + 49297) % 233280) / 233280;
+      for (let k = 0; k < 70; k++) {
+        const bx = rr() * w, by = rr() * h, br = 10 + rr() * 34;
+        c.fillStyle = `rgba(${90 + rr() * 50 | 0},${92 + rr() * 50 | 0},${96 + rr() * 50 | 0},${0.25 + rr() * 0.35})`;
+        c.beginPath(); for (let a = 0; a < 7; a++) { const an = a / 7 * TAU, rd = br * (0.6 + rr() * 0.6); c.lineTo(bx + Math.cos(an) * rd * 1.4, by + Math.sin(an) * rd); } c.fill();
+      }
+      c.fillStyle = 'rgba(40,40,44,.8)'; c.font = 'italic 800 26px Segoe UI, sans-serif'; c.fillText('HYPERLITE', w * 0.72, h * 0.9);
     } else {                    // Jobe Vanity: azul marino con un gran bloque azul eléctrico
       c.fillStyle = '#141b2e'; c.fillRect(0, 0, w, h);
       c.strokeStyle = 'rgba(80,110,190,.35)'; c.lineWidth = 2; for (let k = -10; k < 50; k++) { c.beginPath(); c.moveTo(k * 26, 0); c.lineTo(k * 26 + 160, h); c.stroke(); }
@@ -718,7 +727,7 @@ function makeBoardMesh(style) {
   const mTop = MAT(0xffffff, 0.35, 0.05, { map: top }), mBottom = MAT(0x101112, 0.4);
   const mesh = new T.Mesh(geo, [mTop, mBottom]); mesh.castShadow = true; g.add(mesh);
   // fijaciones (botas)
-  const bootM = MAT(style === 2 ? 0x7fd83a : 0x18191b, 0.6), accent = MAT(style === 0 ? 0xc3f53a : style === 2 ? 0x18191b : 0x2a63ff, 0.5);
+  const bootM = MAT(style === 2 ? 0x7fd83a : 0x18191b, 0.6), accent = MAT(style === 0 ? 0xc3f53a : style === 2 || style === 3 ? 0x18191b : 0x2a63ff, 0.5);
   for (const sx of [-1, 1]) {
     const b = new T.Group(); b.position.set(sx * 0.27, 0.06, 0); b.rotation.y = sx * -0.2; g.add(b);
     box(0.13, 0.05, 0.3, bootM, 0, 0, 0, b);
@@ -727,7 +736,7 @@ function makeBoardMesh(style) {
   }
   return g;
 }
-const BOARDS = [makeBoardMesh(0), makeBoardMesh(1), makeBoardMesh(2)];
+const BOARDS = [makeBoardMesh(0), makeBoardMesh(1), makeBoardMesh(2), makeBoardMesh(3)];
 let boardIdx = 0;
 boardGroup.add(BOARDS[0]);
 function setBoard(i) { boardGroup.remove(BOARDS[boardIdx]); boardIdx = i; boardGroup.add(BOARDS[i]); }
@@ -1698,6 +1707,9 @@ async function loadModels() {
   // Rupert de rider: se baja mientras tanto (si lo eligen antes, sigue Senén hasta que llega)
   const rup = await new Promise(res => loader.load('rupert.glb' + v, res, undefined, () => res(null)));
   const h = rup && setupHuman(rup); if (h) { RIDERS.rupert = h; if (RIDER_NAME === 'rupert') setRider('rupert'); }
+  const om = await new Promise(res => loader.load('omar.glb' + v, res, undefined, () => res(null)));
+  const ho = om && setupHuman(om); if (ho) { RIDERS.omar = ho; if (RIDER_NAME === 'omar') setRider('omar'); }
+  READY.extras = true;
 }
 // mientras cargan no se enseñan ni el maniquí ni la barca provisional: se ve el Pantalán
 const READY = { on: false, t: 0, shots: false };
@@ -2002,9 +2014,21 @@ function updatePeers(dt) {
 const GAME = { running: false, paused: false, t: 0 };
 function togglePause() { if (!GAME.running) return; GAME.paused = !GAME.paused; msg(GAME.paused ? 'PAUSA' : ''); }
 $('bPause').onclick = togglePause; $('bCam').onclick = nextCam;
+// Omar y su tabla (si el móvil tiene guardado un index.html viejo sin ellos, se añaden aquí)
+if (!document.querySelector('#riders .opt[data-r="omar"]')) {
+  const c = document.querySelector('#riders .opt[data-r="rupert"]').cloneNode(true); c.dataset.r = 'omar'; c.classList.remove('sel');
+  c.querySelector('.portrait').style.backgroundImage = 'url(avatar-omar.jpg)'; c.querySelector('.face').style.backgroundImage = 'url(avatar-omar.jpg)';
+  c.querySelector('b').textContent = 'Omar'; c.querySelector('em').textContent = 'Neopreno Billabong · tatuaje en el tobillo';
+  $('riders').appendChild(c);
+}
+if (!document.querySelector('#boards .opt[data-b="3"]')) {
+  const c = document.querySelector('#boards .opt[data-b="2"]').cloneNode(true); c.dataset.b = '3'; c.classList.remove('sel');
+  c.querySelector('b').textContent = 'Blanca'; c.querySelector('em').textContent = 'Camuflaje gris';
+  $('boards').appendChild(c);
+}
 document.querySelectorAll('#boards .opt').forEach(b => b.onclick = () => { document.querySelectorAll('#boards .opt').forEach(x => x.classList.remove('sel')); b.classList.add('sel'); setBoard(+b.dataset.b); });
 document.querySelectorAll('#cams .opt').forEach(b => b.onclick = () => setCam(+b.dataset.c));
-const RIDER_INFO = { senen: ['Senén', 'avatar.jpg', 0], rupert: ['Rupert', 'avatar-rupert.jpg', 2] };
+const RIDER_INFO = { senen: ['Senén', 'avatar.jpg', 0], rupert: ['Rupert', 'avatar-rupert.jpg', 2], omar: ['Omar', 'avatar-omar.jpg', 3] };
 document.querySelectorAll('#riders .opt').forEach(b => b.onclick = () => {
   document.querySelectorAll('#riders .opt').forEach(x => x.classList.remove('sel')); b.classList.add('sel');
   const [name, av, board] = RIDER_INFO[b.dataset.r];
@@ -2070,7 +2094,7 @@ function boardShots() {
 function riderShots() {
   const cam = new T.PerspectiveCamera(34, 0.8, 0.1, 3000), keep = RIDER_NAME, rp = riderRoot.position;
   const toBoat = V3().subVectors(towW, rp).setY(0).normalize();
-  for (const name of ['senen', 'rupert']) {
+  for (const name of ['senen', 'rupert', 'omar']) {
     if (!RIDERS[name]) continue;
     setRider(name); poseBody(J); riderRoot.updateMatrixWorld(true);
     cam.position.copy(rp).addScaledVector(CAM.chest, 2.5).addScaledVector(toBoat, 1.2).add(V3(0, 1.15, 0));
@@ -2107,7 +2131,7 @@ function frame() {
   waterNear.position.set(Math.round(rp.x / 2) * 2, 0, Math.round(rp.z / 2) * 2);
   sun.position.copy(rp).addScaledVector(SUN_DIR, 80); sun.target.position.copy(rp); sun.target.updateMatrixWorld();
   sky.position.copy(camera.position);
-  if (READY.on && !READY.shots && RIDERS.rupert && GAME.t - READY.t > 2 && RIDER.state === 'ride') {
+  if (READY.on && !READY.shots && READY.extras && GAME.t - READY.t > 2 && RIDER.state === 'ride') {
     READY.shots = true; try { riderShots(); } catch (e) { console.warn(e); }
     camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   }
