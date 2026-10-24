@@ -966,7 +966,7 @@ function readSticks() {
   // Espacio = el centro del stick derecho: mantener agacha, soltar salta
   if (k.Space) prevSpace = true; else if (prevSpace) { prevSpace = false; R.rel = { x: 0, y: k.KeyR ? -1 : 0, circled: false }; }
   // Riding: ← → carvean (soltar la flecha = pop) · Espacio ollie. Grabs: G (+ flechas para el tweak), O la otra mano
-  if (!air) { if (k.ArrowLeft) L.x = -1; if (k.ArrowRight) L.x = 1; if (k.ArrowUp) L.y = 1; }
+  if (!air) { if (k.ArrowLeft) L.x = -1; if (k.ArrowRight) L.x = 1; if (k.ArrowUp) L.y = 1; if (k.ArrowDown) L.y = -1; }
   if (air && k.KeyG) {
     L.y = 1; L.x = 0;                                   // G solo = Indy
     if (k.ArrowUp) { L.y = 1; L.x = 0; } if (k.ArrowDown) { L.y = -1; L.x = 0; }
@@ -988,7 +988,7 @@ function stickSVG(words) {
     <text x="0" y="-41">${words[0]}</text><text x="44" y="4">${words[1]}</text><text x="0" y="49">${words[2]}</text><text x="-44" y="4">${words[3]}</text></svg>
     <i class="knob">${''}</i>`;
 }
-$('stL').innerHTML = stickSVG(['', 'CARVE', '', 'CARVE']).replace('id="__land"', 'id="landL"').replace('<i class="knob"></i>', '<i class="knob">L</i>');   // dirección
+$('stL').innerHTML = stickSVG(['180', 'CARVE', 'MANUAL', 'CARVE']).replace('id="__land"', 'id="landL"').replace('<i class="knob"></i>', '<i class="knob">L</i>');   // dirección
 $('stR').innerHTML = stickSVG(['SPIN', 'ROLL', 'SPIN', 'ROLL']).replace('id="__land"', 'id="landR"').replace('<i class="knob"></i>', '<i class="knob">OLLIE</i>');   // centro: agacharse y saltar
 // la posición se pone aquí también: si el móvil tiene guardado un index.html viejo, el círculo de la dirección seguiría a la derecha
 Object.assign($('stL').style, { left: 'max(18px, env(safe-area-inset-left))', right: 'auto' });
@@ -1073,7 +1073,16 @@ function endGrind() {
   say(`Wake Grind<small>+${pts.toLocaleString('es-ES')}</small>`, '', 1.6);
 }
 
+function endManual() {
+  const R = RIDER, t = R.manualT || 0; R.manualT = 0; R.manualSaid = false;
+  if (t < 0.5) return;
+  const rep = R.history.Manual || 0; R.history.Manual = rep + 1;
+  const pts = Math.round((80 + 180 * Math.min(t, 4)) * Math.pow(0.75, rep) / 10) * 10;
+  R.score += pts; $('score').textContent = R.score.toLocaleString('es-ES');
+  say(`Manual<small>+${pts.toLocaleString('es-ES')}</small>`, '', 1.5);
+}
 function pop(q, kind, popPos) {
+  if (RIDER.manualT) endManual();   // manual to ollie
   const R = RIDER, f = wakeFrame(R.pos.x, R.pos.z), A = wakeAmp(f.d) / WAKE.amp, S = R.lastS;
   const vlat = Math.abs(R.omega) * ROPE;
   const big = R.bangerOn ? 1.15 : 1;
@@ -1272,6 +1281,10 @@ function updateRider(dt, t) {
     const upL = S.L.y > 0.7 && S.L.y > Math.abs(S.L.x) * 1.5;
     if (upL && !R.upHeld) surface180();
     R.upHeld = upL;
+    // círculo izquierdo hacia abajo: manual (como en el skate): la cola clavada en el agua y la punta levantada
+    const downL = S.L.y < -0.6 && -S.L.y > Math.abs(S.L.x);
+    if (downL && R.state === 'ride') { R.manualT = (R.manualT || 0) + dt; if (R.manualT > 0.3 && !R.manualSaid) { R.manualSaid = true; say('Manual', '', 0.8); } }
+    else if (R.manualT) endManual();
     if (S.L.tap || IN.kbOther) R.otherHand = !R.otherHand && !IN.kbOther ? true : (IN.kbOther ? true : false);
     // --- pop: mantener el centro del stick derecho (se agacha) y soltarlo. En la cresta salta la estela, en plano es un ollie.
     //     Soltarlo arrastrado abajo = raley, arriba (de talones) = whirly
@@ -1432,6 +1445,9 @@ function updateRider(dt, t) {
     tmp.q2.setFromUnitVectors(UP, tmp.n);
     riderRoot.quaternion.copy(tmp.q2).multiply(tmp.q);
     riderRoot.rotateX(R.edge);
+    // manual: gira sobre la cola (la punta sube y la cola se queda en el agua)
+    R.manual = lerp(R.manual || 0, R.manualT && R.state === 'ride' ? 1 : 0, clamp(dt * 8, 0, 1));
+    if (R.manual > 0.005) { const m = R.manual * 0.34; riderRoot.rotateZ(m); riderRoot.position.y += Math.sin(m) * 0.62; }
     const sp = Math.abs(latV) + (R.grind ? 6 : 0), n = Math.min(R.grind ? 7 : 4, Math.floor(sp * 0.6 * dt * 60 * 0.25 + rnd()));
     for (let i = 0; i < n; i++) {
       tmp.a.set(rnd(-0.6, 0.6), 0.02, -Math.sign(latV) * 0.2).applyQuaternion(riderRoot.quaternion).add(riderRoot.position);
