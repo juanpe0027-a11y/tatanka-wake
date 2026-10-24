@@ -1,0 +1,15 @@
+{
+ "name": "Wake · Puerto de Sagunto",
+ "short_name": "Wake",
+ "start_url": "./",
+ "display": "fullscreen",
+ "background_color": "#0b2a3a",
+ "theme_color": "#0b2a3a",
+ "icons": [
+  {
+   "src": "avatar.jpg",
+   "sizes": "200x200",
+   "type": "image/jpeg"
+  }
+ ]
+}

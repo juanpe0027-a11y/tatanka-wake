@@ -1678,6 +1678,13 @@ function showPanel(id) { for (const p of ['pMain', 'pChars', 'pControls']) $(p).
 $('toChars').onclick = () => showPanel('pChars'); $('charsOk').onclick = () => showPanel('pMain');
 $('toControls').onclick = () => showPanel('pControls'); $('controlsOk').onclick = () => showPanel('pMain');
 $('camBtn').onclick = () => { setCam((CAM.mode + 1) % 4); $('camBtn').textContent = 'Cámara: ' + CAM.names[CAM.mode].toLowerCase(); };
+// en el móvil se pone en pantalla completa sola al primer toque (el navegador no deja hacerlo sin tocar)
+function autoFullscreen(e) {
+  const d = document.documentElement;
+  if (!IS_MOBILE || document.fullscreenElement || !d.requestFullscreen || (e.target && e.target.id === 'fsBtn')) return;
+  d.requestFullscreen({ navigationUI: 'hide' }).then(() => { try { screen.orientation.lock && screen.orientation.lock(screen.orientation.type).catch(() => {}); } catch (er) {} }).catch(() => {});
+}
+addEventListener('pointerup', autoFullscreen, true); addEventListener('touchend', autoFullscreen, true);
 $('fsBtn').onclick = () => { const d = document.documentElement; if (document.fullscreenElement) document.exitFullscreen(); else if (d.requestFullscreen) d.requestFullscreen().catch(() => {}); };
 try { const n = localStorage.getItem('wake-nick'); if (n) $('nick').value = n; } catch (e) {}
 $('nick').addEventListener('input', () => { try { localStorage.setItem('wake-nick', $('nick').value.trim()); } catch (e) {} });
