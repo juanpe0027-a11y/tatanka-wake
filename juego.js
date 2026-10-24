@@ -536,13 +536,6 @@ const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
     const t = new T.Mesh(new T.CylinderGeometry(24, 24, 34, 40), MAT(0xf3f2ee, 0.5)); t.position.set(tx, 18, tz); world.add(t);
     const d = new T.Mesh(new T.SphereGeometry(24, 40, 12, 0, TAU, 0, Math.PI * 0.3), MAT(0xf3f2ee, 0.5)); d.position.set(tx, 35, tz); world.add(d);
   }
-  const craneM = MAT(0xc9a03a, 0.6, 0.4);
-  for (let k = 0; k < 4; k++) {
-    const g = new T.Group(); g.position.set(PX + 560 + k * 70, 1.5, -420); world.add(g);
-    for (const [px, pz] of [[-6, -6], [6, -6], [-6, 6], [6, 6]]) box(1.2, 30, 1.2, craneM, px, 15, pz, g, false);
-    box(14, 2, 14, craneM, 0, 30, 0, g, false);
-    const boom = box(3, 2.4, 70, craneM, 0, 34, -22, g, false); boom.rotation.x = -0.08;
-  }
 
   // ---- Alto Horno nº 2 y la Sierra Calderona al fondo
   {
@@ -577,9 +570,9 @@ const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
 //      blanca de celosía hasta los duques de alba rojos de la punta, el último con la baliza amarilla y negra.
 {
   const pier = new T.Group(); pier.position.x = PIER_X; world.add(pier);
-  const deckM = MAT(0xc9bea8, 0.9), deckDark = MAT(0x958b7b, 0.95), pileM = MAT(0x6d655c, 0.85, 0.2), rustM = MAT(0x9a4f26, 0.8, 0.35);
+  const deckM = MAT(0xc9bea8, 0.9), deckDark = MAT(0x958b7b, 0.95), pileM = MAT(0x4b3f37, 0.85, 0.2), rustM = MAT(0x9a4f26, 0.8, 0.35);
   const railOld = MAT(0x5a554f, 0.7, 0.4), white = MAT(0xeeeeea, 0.45, 0.2), machine = MAT(0x5f6a73, 0.6, 0.5), redPile = MAT(0x8e3322, 0.75, 0.3);
-  const DY = 7.5, W = 8, SPAN = 15, Z_START = SHORE_Z + 20, Z_END = SHORE_Z - 1150;
+  const DY = 7.5, W = 8, SPAN = 30, Z_START = SHORE_Z + 20, Z_END = SHORE_Z - 1150;
   const nSpan = Math.floor((Z_START - Z_END) / SPAN);
   const o = new T.Object3D();
   const decks = new T.InstancedMesh(new T.BoxGeometry(W, 1.0, SPAN + 0.02), deckM, nSpan);
@@ -587,12 +580,16 @@ const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
   const caps = new T.InstancedMesh(new T.BoxGeometry(W + 0.8, 0.9, 1.2), deckDark, nSpan + 10);
   const posts = new T.InstancedMesh(new T.BoxGeometry(0.06, 1.1, 0.06), railOld, nSpan * 2 * 6);
   let np = 0, nc = 0, nq = 0;
-  const addPile = (x, z, top) => { o.position.set(x, (top - 4) / 2, z); o.rotation.set(0, 0, 0); o.scale.set(1, top + 4, 1); o.updateMatrix(); piles.setMatrixAt(np++, o.matrix); };
+  const addPile = (x, z, top, xb = x) => {   // de (x, top) arriba a (xb, -4) abajo
+    const a = V3(x, top, z), b = V3(xb, -4, z), d = V3().subVectors(a, b), L = d.length();
+    o.position.copy(b).addScaledVector(d, 0.5); o.quaternion.setFromUnitVectors(UP, d.normalize()); o.scale.set(1.15, L, 1.15); o.updateMatrix(); piles.setMatrixAt(np++, o.matrix);
+    o.quaternion.identity(); o.rotation.set(0, 0, 0);
+  };
   for (let i = 0; i < nSpan; i++) {
     const z0 = Z_START - i * SPAN, zc = z0 - SPAN / 2;
     o.position.set(0, DY, zc); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); o.updateMatrix(); decks.setMatrixAt(i, o.matrix);
     if (z0 < SHORE_Z - 15) {
-      for (const x of [-2.9, 0, 2.9]) addPile(x, z0, DY - 0.8);
+      addPile(0, z0, DY - 0.8); addPile(-2.6, z0, DY - 0.8, -5.2); addPile(2.6, z0, DY - 0.8, 5.2);
       o.position.set(0, DY - 0.9, z0); o.scale.set(1, 1, 1); o.updateMatrix(); caps.setMatrixAt(nc++, o.matrix);
     }
     for (const sx of [-1, 1]) {
@@ -842,6 +839,54 @@ function updateSpray(dt) {
 }
 
 // =====================================================================================
+//  ESTELA DE LA TABLA: franja de espuma que deja el canto al cortar el agua
+// =====================================================================================
+const TRAIL_N = 110, TRAIL_LIFE = 3.0;
+const trail = { pts: [], acc: 0 };
+const trailGeo = new T.BufferGeometry();
+const trPos = new Float32Array(TRAIL_N * 2 * 3), trA = new Float32Array(TRAIL_N * 2), trU = new Float32Array(TRAIL_N * 2);
+trailGeo.setAttribute('position', new T.BufferAttribute(trPos, 3));
+trailGeo.setAttribute('aA', new T.BufferAttribute(trA, 1));
+trailGeo.setAttribute('aU', new T.BufferAttribute(trU, 1));
+{ const idx = []; for (let i = 0; i < TRAIL_N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } trailGeo.setIndex(idx); }
+const trailMat = new T.ShaderMaterial({
+  uniforms: { tNoise: U.tNoise, uTime: U.uTime },
+  vertexShader: `attribute float aA; attribute float aU; varying float vA; varying float vU; varying vec2 vW;
+    void main(){ vA = aA; vU = aU; vW = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform sampler2D tNoise; uniform float uTime; varying float vA; varying float vU; varying vec2 vW;
+    void main(){ float edge = 1.0 - abs(vU * 2.0 - 1.0); float n = texture2D(tNoise, vW * 0.35 + uTime * 0.02).r;
+      float a = vA * smoothstep(0.0, 0.6, edge) * (0.55 + 0.7 * n); if (a < 0.02) discard;
+      gl_FragColor = vec4(vec3(0.94, 0.97, 0.98), clamp(a, 0.0, 0.9)); }`,
+  transparent: true, depthWrite: false, side: T.DoubleSide,
+});
+const trailMesh = new T.Mesh(trailGeo, trailMat); trailMesh.frustumCulled = false; trailMesh.renderOrder = 2; scene.add(trailMesh);
+function updateTrail(dt, t) {
+  const R = RIDER, riding = R.state === 'ride' || R.state === 'start';
+  for (const q of trail.pts) q.age += dt;
+  trail.acc += dt;
+  if (trail.acc > 0.03) {
+    trail.acc = 0;
+    // el punto sale de la cola de la tabla (lo que va detrás según hacia dónde se mueve)
+    const v = R.vel, sp = Math.hypot(v.x, v.z) || 1;
+    trail.pts.unshift({ x: R.pos.x - v.x / sp * 0.55, z: R.pos.z - v.z / sp * 0.55, age: 0, on: riding, k: clamp(Math.abs(R.edge) * 2.2 + 0.35, 0.35, 1) });
+    if (trail.pts.length > TRAIL_N) trail.pts.length = TRAIL_N;
+  }
+  const P = trail.pts;
+  for (let i = 0; i < TRAIL_N; i++) {
+    const q = P[Math.min(i, P.length - 1)];
+    if (!q) continue;
+    const q2 = P[Math.min(i + 1, P.length - 1)], q0 = P[Math.min(Math.max(i - 1, 0), P.length - 1)];
+    let dx = q0.x - q2.x, dz = q0.z - q2.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    const life = clamp(1 - q.age / TRAIL_LIFE, 0, 1), w = (0.16 + 0.75 * (1 - life)) * q.k;
+    const y = surfaceH(q.x, q.z, t) + 0.04;
+    trPos.set([q.x - dz * w, y, q.z + dx * w, q.x + dz * w, y, q.z - dx * w], i * 6);
+    const a = i < P.length && q.on ? life * life * 0.85 * q.k : 0;
+    trA[i * 2] = trA[i * 2 + 1] = a; trU[i * 2] = 0; trU[i * 2 + 1] = 1;
+  }
+  trailGeo.attributes.position.needsUpdate = true; trailGeo.attributes.aA.needsUpdate = true; trailGeo.attributes.aU.needsUpdate = true;
+}
+
+// =====================================================================================
 //  CONTROLES (copiados de Pocket Shredders): stick L = carve / ollie / pop / grabs,
 //  stick R = spins / rolls / raley / whirly / S-Bend. Teclado como en su juego.
 // =====================================================================================
@@ -872,7 +917,7 @@ function trackCircle(s) {
 }
 addEventListener('pointerdown', e => {
   if (!GAME.running || e.target.closest('button') || e.target.closest('#stance')) return;
-  const side = e.clientX < innerWidth / 2 ? 'L' : 'R';
+  const side = e.clientX < innerWidth / 2 ? 'R' : 'L';   // controles al revés: la dirección con la mano derecha
   for (const [, t] of touches) if (t.side === side) return;
   touches.set(e.pointerId, { side, x0: e.clientX, y0: e.clientY });
   stickTouchStart(side);
@@ -902,6 +947,10 @@ $('stance').addEventListener('click', () => { if (GAME.running) surface180(); })
 
 // junta táctil y teclado en un estado por stick (y recoge los eventos del fotograma)
 function readSticks() {
+  if (!GAME.running) {   // intro: carvea solo, suave, sin saltar
+    if (RIDER.state === 'fallen' && RIDER.fallT > 2) getUp();
+    return { L: { x: Math.sin(GAME.t * 0.32) > 0.2 ? 0.75 : Math.sin(GAME.t * 0.32) < -0.2 ? -0.75 : 0, y: 0, tap: false, circle: 0 }, R: { x: 0, y: 0, tap: false, circle: 0 } };
+  }
   const k = IN.kb, air = RIDER.state === 'air';
   const L = { x: IN.L.x, y: IN.L.y, tap: IN.L.tapEv, circle: IN.L.circleEv };
   const R = { x: IN.R.x, y: IN.R.y, tap: IN.R.tapEv, circle: IN.R.circleEv };
@@ -931,8 +980,8 @@ function stickSVG(words) {
     <text x="0" y="-41">${words[0]}</text><text x="44" y="4">${words[1]}</text><text x="0" y="49">${words[2]}</text><text x="-44" y="4">${words[3]}</text></svg>
     <i class="knob">${''}</i>`;
 }
-$('stL').innerHTML = stickSVG(['OLLIE', 'CARVE', '', 'CARVE']).replace('id="__land"', 'id="landL"').replace('<i class="knob"></i>', '<i class="knob">L</i>');
-$('stR').innerHTML = stickSVG(['SPIN', 'ROLL', 'SPIN', 'ROLL']).replace('id="__land"', 'id="landR"').replace('<i class="knob"></i>', '<i class="knob">R</i>');
+$('stL').innerHTML = stickSVG(['OLLIE', 'CARVE', '', 'CARVE']).replace('id="__land"', 'id="landL"').replace('<i class="knob"></i>', '<i class="knob">R</i>');   // el de la dirección va a la derecha
+$('stR').innerHTML = stickSVG(['SPIN', 'ROLL', 'SPIN', 'ROLL']).replace('id="__land"', 'id="landR"').replace('<i class="knob"></i>', '<i class="knob">L</i>');
 function drawSticks(S) {
   for (const [id, s] of [['stL', S.L], ['stR', S.R]]) {
     const k = $(id).querySelector('.knob'); k.style.transform = `translate(${(s.x * 40).toFixed(1)}px, ${(-s.y * 40).toFixed(1)}px)`;
@@ -986,7 +1035,11 @@ function showPop(pos01, rollerPos) {
 }
 function chestWorld(out) { return out.set(0, 0, 1).applyQuaternion(riderRoot.quaternion).setY(0).normalize(); }
 // lado de la pantalla hacia el que viaja el rider (para «hacia donde vas / al contrario»)
-function travelScreenSign() { tmp.c.set(1, 0, 0).applyQuaternion(camera.quaternion).setY(0).normalize(); return Math.sign(RIDER.vel.x * tmp.c.x + RIDER.vel.z * tmp.c.z) || 1; }
+function travelScreenSign() {
+  // como si se mirara desde detrás (en la lateral la derecha de la pantalla no sirve), y al revés desde la barca
+  const d = trailDir(tmp.n), px = -d.z, pz = d.x, lat = RIDER.vel.x * px + RIDER.vel.z * pz;
+  return (Math.sign(lat) || 1) * (CAM.mode === 2 ? -1 : 1);
+}
 
 // cambio de pie en el agua (surface 180): la tabla gira sobre el agua
 function surface180() {
@@ -1163,7 +1216,8 @@ function updateRider(dt, t) {
       const c = R.state === 'start' ? 0 : S.L.x;          // solo cuenta lo lateral
       // el stick va según la pantalla: a la derecha = hacia la derecha de la cámara (en cualquier pie)
       const d = trailDir(tmp.n); tmp.c.set(1, 0, 0).applyQuaternion(camera.quaternion);
-      const side = Math.sign(-d.z * tmp.c.x + d.x * tmp.c.z) || 1;
+      const proj = -d.z * tmp.c.x + d.x * tmp.c.z;
+      const side = CAM.mode === 2 ? -1 : (Math.abs(proj) > 0.4 ? Math.sign(proj) : 1);   // desde la barca se ve al revés; en la lateral, como desde detrás
       const target = c * 0.4 * side - R.theta * 0.16;
       R.omega += (target - R.omega) * clamp(dt * 1.8, 0, 1);
     } else R.omega *= 1 - 0.15 * dt;
@@ -1323,8 +1377,12 @@ function updateRider(dt, t) {
   } else {
     chestWorld(tmp.c);
     const latV = vh.dot(tmp.c);
-    R.edge = lerp(R.edge, clamp(latV / 6, -1, 1) * 0.42, clamp(dt * 5, 0, 1));
-    R.lean = lerp(R.lean, clamp(latV / 6, -1, 1) * 0.9, clamp(dt * 5, 0, 1));
+    const dT = trailDir(tmp.n), outX = -dT.z * Math.sign(R.theta), outZ = dT.x * Math.sign(R.theta);
+    const outChest = outX * tmp.c.x + outZ * tmp.c.z;                         // +1 si el exterior está hacia los dedos
+    const hold = outChest * clamp(Math.abs(R.theta) / 0.7, 0, 1) * 0.85;      // cuanto más fuera, más clavado el canto
+    const lt = clamp(latV / 6 + hold, -1, 1);
+    R.edge = lerp(R.edge, lt * 0.5, clamp(dt * 4, 0, 1));
+    R.lean = lerp(R.lean, lt * 0.95, clamp(dt * 4, 0, 1));
     surfaceNormal(R.pos.x, R.pos.z, t, tmp.n);
     tmp.q.setFromAxisAngle(UP, R.yaw + R.yawAnim);
     tmp.q2.setFromUnitVectors(UP, tmp.n);
@@ -1412,13 +1470,42 @@ function updateCamera(dt) {
   const want = tmp.c, look = tmp.n;
   // como en Pocket Shredders: detrás y algo ladeada hacia el pecho del rider, para verle los brazos y la maneta
   chestWorld(tmp.p2 = tmp.p2 || V3()); CAM.chest = (CAM.chest || V3()).lerp(tmp.p2, clamp(dt * 1.5, 0, 1));
-  if (CAM.mode === 0) { want.copy(rp).addScaledVector(toBoat, -7.2).add(V3(0, 3.2, 0)).addScaledVector(CAM.chest, 2.8); look.lerpVectors(rp, towW, 0.3).setY(1.1); }
-  else if (CAM.mode === 1) { want.copy(rp).addScaledVector(toBoat, -4.6).add(V3(0, 1.3, 0)).addScaledVector(side, 1.2); look.lerpVectors(rp, towW, 0.25).setY(1.0); }
+  const portrait = camera.aspect < 1, far = portrait ? 1.35 : 1;
+  const fov = portrait ? 74 : 58; if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  if (!GAME.running) { introCamera(dt, rp, toBoat); return; }
+  // se mira a un punto delante del rider en la línea hacia la barca: el rider queda en el centro de la pantalla
+  if (CAM.mode === 0) { want.copy(rp).addScaledVector(toBoat, -7.2 * far).add(V3(0, 3.2 * far, 0)).addScaledVector(CAM.chest, portrait ? 1.2 : 2.8); look.copy(rp).addScaledVector(toBoat, 5).setY(1.1); }
+  else if (CAM.mode === 1) { want.copy(rp).addScaledVector(toBoat, -4.6 * far).add(V3(0, 1.4 * far, 0)).addScaledVector(side, portrait ? 0.5 : 1.2); look.copy(rp).addScaledVector(toBoat, 4).setY(1.0); }
   else if (CAM.mode === 2) { want.copy(towW).add(V3(0, 0.4, 0)).addScaledVector(toBoat, 0.6); look.copy(rp).setY(rp.y + 0.9); }
-  else { want.copy(rp).addScaledVector(side, -9).addScaledVector(toBoat, 2).add(V3(0, 2.0, 0)); look.copy(rp).setY(rp.y + 0.9).addScaledVector(toBoat, 2); }
-  if (R.state === 'air' && CAM.mode !== 2) want.y += R.y * 0.45;
-  const k = clamp(dt * (CAM.mode === 2 ? 10 : 4.5), 0, 1);
-  CAM.pos.lerp(want, k); CAM.look.lerp(look, clamp(dt * 7, 0, 1));
+  else { want.copy(rp).addScaledVector(side, -9 * far).addScaledVector(toBoat, 2).add(V3(0, 2.0, 0)); look.copy(rp).setY(rp.y + 0.9); }
+  if (R.state === 'air' && CAM.mode !== 2) { want.y += R.y * 0.45; look.y += R.y * 0.6; }
+  // se suaviza la posición RELATIVA al rider: así va siempre centrado aunque cruce rápido de un lado a otro
+  const k = clamp(dt * (CAM.mode === 2 ? 10 : 3.5), 0, 1);
+  CAM.off = (CAM.off || want.clone().sub(rp)).lerp(want.sub(rp), k);
+  CAM.lookOff = (CAM.lookOff || look.clone().sub(rp)).lerp(look.sub(rp), clamp(dt * 6, 0, 1));
+  CAM.pos.copy(rp).add(CAM.off); CAM.look.copy(rp).add(CAM.lookOff);
+  camera.position.copy(CAM.pos); camera.lookAt(CAM.look);
+}
+// intro (con el menú): planos que van cambiando: el patrón al volante, el rider de cerca y una general con el Pantalán
+const INTRO = { shot: -1, t: 0 };
+function introCamera(dt, rp, toBoat) {
+  INTRO.t += dt;
+  const shot = Math.floor(INTRO.t / 7) % 3, cut = shot !== INTRO.shot; INTRO.shot = shot;
+  const want = tmp.c, look = tmp.n;
+  const portrait = camera.aspect < 1, side = V3(-toBoat.z, 0, toBoat.x);
+  if (shot === 0) {            // el patrón al volante, desde arriba y por delante de estribor
+    boat.updateMatrixWorld(true);
+    want.copy(boat.localToWorld(V3(-3.2, 2.1, 1.2))); look.copy(boat.localToWorld(V3(-0.5, 1.25, -0.35)));
+  } else if (shot === 1) {     // el rider de cerca, de tres cuartos por delante
+    want.copy(rp).addScaledVector(CAM.chest, 3.8).addScaledVector(toBoat, 2.4).add(V3(0, 1.6, 0)); look.copy(rp).setY(rp.y + 1.0);
+  } else {                     // general alta desde detrás: rider delante, la cuerda, la barca y la costa al fondo
+    const mid = V3().lerpVectors(rp, towW, 0.5);
+    want.copy(rp).addScaledVector(toBoat, -9).addScaledVector(side, 5).add(V3(0, 7, 0)); look.copy(mid).setY(0.5);
+  }
+  // en vertical el menú tapa la mitad de abajo: se apunta más bajo para que barca y rider queden arriba
+  if (portrait) look.y -= shot === 2 ? 7 : 2.6;
+  // la cámara va pegada a lo que filma (se mueve a 37 km/h): si se suavizara se quedaría atrás
+  CAM.pos.copy(want); CAM.look.copy(look);
   camera.position.copy(CAM.pos); camera.lookAt(CAM.look);
 }
 
@@ -1426,7 +1513,17 @@ function updateCamera(dt) {
 //  CARGA DE MODELOS (Senén y la Tatanka exportados desde Blender)
 // =====================================================================================
 const loader = new T.GLTFLoader();
-function loadGLB(url) { return new Promise(res => loader.load(url, g => res(g), undefined, () => res(null))); }
+const LOADP = {};
+function loadProgress() {
+  let a = 0, b = 0; for (const k in LOADP) { a += LOADP[k][0]; b += LOADP[k][1]; }
+  const pct = b ? Math.round(a / b * 100) : 0;
+  $('loadBar').style.width = pct + '%'; $('loadPct').textContent = pct + ' %';
+}
+function loadGLB(url, size) {
+  LOADP[url] = [0, size];
+  return new Promise(res => loader.load(url, g => { LOADP[url][0] = LOADP[url][1]; loadProgress(); res(g); },
+    e => { if (e.total) LOADP[url][1] = e.total; LOADP[url][0] = e.loaded; loadProgress(); }, () => res(null)));
+}
 const H_ALIAS = {   // nombres de huesos: esqueleto «game engine» de MakeHuman y Mixamo
   Hips: ['pelvis', 'mixamorigHips', 'Hips'], Spine: ['spine_01', 'mixamorigSpine'], Spine1: ['spine_02', 'mixamorigSpine1'], Spine2: ['spine_03', 'mixamorigSpine2'],
   Neck: ['neck_01', 'mixamorigNeck'], Head: ['head', 'mixamorigHead'],
@@ -1498,7 +1595,8 @@ function handWorld(out) {
 }
 async function loadModels() {
   const v = '?v=' + Date.now();
-  const [sen, tat, rup, pat] = await Promise.all(['senen', 'tatanka', 'rupert', 'rupert_patron'].map(n => loadGLB(n + '.glb' + v)));
+  const SIZES = { senen: 7.7e6, tatanka: 1.4e6, rupert: 8.7e6, rupert_patron: 8.5e6 };
+  const [sen, tat, rup, pat] = await Promise.all(['senen', 'tatanka', 'rupert', 'rupert_patron'].map(n => loadGLB(n + '.glb' + v, SIZES[n])));
   if (tat) {
     boat.remove(BOAT.model); BOAT.model = tat.scene; boat.add(tat.scene);
     tat.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
@@ -1512,7 +1610,9 @@ async function loadModels() {
   const hd = pat && setupHuman(pat), hs = sen && setupHuman({ scene: T.SkeletonUtils.clone(sen.scene) });
   for (const [n, h] of [['rupert', hd], ['senen', hs]]) if (h) { DRIVERS[n] = h; h.root.position.copy(DRIVER.at); h.root.visible = false; boat.add(h.root); }
   setDriver(RIDER_NAME === 'rupert' ? 'senen' : 'rupert');
-  $('load').textContent = sen ? '' : 'Senén provisional: falta senen.glb';
+  const ok = sen && tat && rup && pat;
+  $('loadLine').textContent = ok ? '✅ Barca y riders listos' : '⚠️ No se han podido cargar todos los modelos: recarga la página';
+  $('go').disabled = !ok && !sen;
 }
 const RIDERS = {}, DRIVERS = {}; let RIDER_NAME = 'senen';
 function setDriver(n) { for (const k in DRIVERS) DRIVERS[k].root.visible = k === n; DRIVER.h = DRIVERS[n] || null; }
@@ -1548,17 +1648,25 @@ function togglePause() { if (!GAME.running) return; GAME.paused = !GAME.paused; 
 $('bPause').onclick = togglePause; $('bCam').onclick = nextCam;
 document.querySelectorAll('#boards .opt').forEach(b => b.onclick = () => { document.querySelectorAll('#boards .opt').forEach(x => x.classList.remove('sel')); b.classList.add('sel'); setBoard(+b.dataset.b); });
 document.querySelectorAll('#cams .opt').forEach(b => b.onclick = () => setCam(+b.dataset.c));
-const RIDER_INFO = { senen: ['SENÉN', 'avatar.jpg', 0], rupert: ['RUPERT', 'avatar-rupert.jpg', 2] };
+const RIDER_INFO = { senen: ['Senén', 'avatar.jpg', 0], rupert: ['Rupert', 'avatar-rupert.jpg', 2] };
 document.querySelectorAll('#riders .opt').forEach(b => b.onclick = () => {
   document.querySelectorAll('#riders .opt').forEach(x => x.classList.remove('sel')); b.classList.add('sel');
   const [name, av, board] = RIDER_INFO[b.dataset.r];
   setRider(b.dataset.r); $('riderName').textContent = name; $('avatar').style.backgroundImage = `url(${av})`;
-  $('riderSub').textContent = 'Rider · Barca Tatanka (Glastron) · Patrón: ' + (b.dataset.r === 'rupert' ? 'Senén' : 'Rupert');
+  $('riderSub').textContent = 'Patrón: ' + (b.dataset.r === 'rupert' ? 'Senén' : 'Rupert') + ' · Barca Tatanka';
+  try { localStorage.setItem('wake-rider', b.dataset.r); } catch (e) {}
   document.querySelector(`#boards .opt[data-b="${board}"]`).click();
   setDriver(b.dataset.r === 'rupert' ? 'senen' : 'rupert');
 });
+function showPanel(id) { for (const p of ['pMain', 'pChars', 'pControls']) $(p).hidden = p !== id; }
+$('toChars').onclick = () => showPanel('pChars'); $('charsOk').onclick = () => showPanel('pMain');
+$('toControls').onclick = () => showPanel('pControls'); $('controlsOk').onclick = () => showPanel('pMain');
+$('camBtn').onclick = () => { setCam((CAM.mode + 1) % 4); $('camBtn').textContent = 'Cámara: ' + CAM.names[CAM.mode].toLowerCase(); };
+$('fsBtn').onclick = () => { const d = document.documentElement; if (document.fullscreenElement) document.exitFullscreen(); else if (d.requestFullscreen) d.requestFullscreen().catch(() => {}); };
+try { const n = localStorage.getItem('wake-nick'); if (n) $('nick').value = n; } catch (e) {}
+$('nick').addEventListener('input', () => { try { localStorage.setItem('wake-nick', $('nick').value.trim()); } catch (e) {} });
 $('go').onclick = () => {
-  $('menu').hidden = true; $('hud').hidden = false; GAME.running = true; getUp();
+  $('menu').hidden = true; $('hud').hidden = false; GAME.running = true; getUp(); setCam(CAM.mode);
   if (IS_MOBILE && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
 };
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); sprayMat.uniforms.uScale.value = innerHeight * 0.5; });
@@ -1574,6 +1682,7 @@ function frame() {
     poseDriver(BOAT.turn || 0, t);
     updateRider(dt, t);
     updateSpray(dt);
+    updateTrail(dt, t);
     $('speed').textContent = `${Math.round(BOAT.speed * 3.6)} KM/H · CUERDA ${ROPE.toFixed(0)} M`;
   }
   if (!window.__freeCam) updateCamera(dt);   // __freeCam: cámara libre para revisar el escenario
