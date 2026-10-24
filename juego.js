@@ -1172,6 +1172,7 @@ function trickName(a, halfTurns, flips, deg) {
 
 function land() {
   const R = RIDER, a = R.air;
+  R.armed = false;   // el tip flip armado no pasa al siguiente salto
   R.lastLand = { spin: +a.spin.toFixed(2), flip: +a.flip.toFixed(2), t: +a.t.toFixed(2), spinning: a.spinning, flipping: a.flipping };
   const halfTurns = Math.round(a.spin / Math.PI), spinErr = Math.abs(a.spin - halfTurns * Math.PI);
   const flips = Math.round(a.flip / TAU), flipErr = Math.abs(a.flip - flips * TAU);
@@ -1267,7 +1268,8 @@ function updateRider(dt, t) {
     const onOuter = u > 0.94 && u < 1.75 && inward && A > 0.12, onInner = u > 0.5 && u < 1.08 && !inward && A > 0.12;
     if (hold) R.ollieArm = Math.min(1, R.ollieArm + dt * 2.5);
     if (S.R.rel && !S.R.rel.circled) {
-      R.armed = Math.abs(S.R.rel.y) > 0.5; S.R.y = S.R.rel.y;          // pop() mira hacia dónde se soltó
+      // pop() mira hacia dónde se soltó: abajo raley, arriba whirly, de lado queda armado el tip flip (aro azul en el aire)
+      R.armed = Math.abs(S.R.rel.y) > 0.5 || Math.abs(S.R.rel.x) > 0.5; S.R.y = S.R.rel.y;
       const q0 = clamp(R.ollieArm, 0.3, 1);
       if (R.grind) { endGrind(); pop(0.85, 'wake', 0.5); }
       else if (onOuter) { const q = clamp(1 - (u - 1) / 0.75, 0, 1); pop(clamp(q, 0.2, 1), 'wake', 0.5 - 0.5 * (1 - q)); }
@@ -1303,7 +1305,6 @@ function updateRider(dt, t) {
     const a = R.air; a.t += dt;
     R.vy -= 9.8 * dt; R.y += R.vy * dt;
     const fast = R.bangerOn ? 1.25 : 1;
-    if (S.R.tap) R.armed = !R.armed;                       // también se arma en el aire (tip flip)
     const rx = S.R.x, ry = S.R.y, rr = Math.hypot(rx, ry);
     const diag = Math.abs(rx) > 0.42 && Math.abs(ry) > 0.42;
     // ---- raley: R abajo mantenido desde la salida; soltar trae la tabla de vuelta. S-Bend: media vuelta con R en el raley
