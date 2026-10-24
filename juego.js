@@ -1682,15 +1682,30 @@ $('camBtn').onclick = () => { setCam((CAM.mode + 1) % 4); $('camBtn').textConten
 function autoFullscreen(e) {
   const d = document.documentElement;
   if (!IS_MOBILE || document.fullscreenElement || !d.requestFullscreen || (e.target && e.target.id === 'fsBtn')) return;
-  d.requestFullscreen({ navigationUI: 'hide' }).then(() => { try { screen.orientation.lock && screen.orientation.lock(screen.orientation.type).catch(() => {}); } catch (er) {} }).catch(() => {});
+  d.requestFullscreen({ navigationUI: 'hide' }).then(() => { if (GAME.running) lockLandscape(); }).catch(() => {});
 }
+// al jugar, horizontal (en el menú se deja girar libre). Si el navegador no deja bloquearlo, se pide girar el móvil
+function lockLandscape() {
+  try { const o = screen.orientation; if (o && o.lock) o.lock('landscape').catch(() => {}); } catch (er) {}
+}
+const rotHint = document.createElement('div');
+rotHint.textContent = '↻ Gira el móvil en horizontal';
+rotHint.style.cssText = 'position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);z-index:60;padding:14px 22px;background:rgba(11,42,58,.88);color:#f7f3ea;font:700 22px "Barlow Condensed",sans-serif;letter-spacing:.04em;border-radius:6px;pointer-events:none;display:none';
+document.body.appendChild(rotHint);
+function updateRotHint() { rotHint.style.display = IS_MOBILE && GAME.running && innerHeight > innerWidth ? 'block' : 'none'; }
+addEventListener('resize', updateRotHint);
 addEventListener('pointerup', autoFullscreen, true); addEventListener('touchend', autoFullscreen, true);
 $('fsBtn').onclick = () => { const d = document.documentElement; if (document.fullscreenElement) document.exitFullscreen(); else if (d.requestFullscreen) d.requestFullscreen().catch(() => {}); };
 try { const n = localStorage.getItem('wake-nick'); if (n) $('nick').value = n; } catch (e) {}
 $('nick').addEventListener('input', () => { try { localStorage.setItem('wake-nick', $('nick').value.trim()); } catch (e) {} });
 $('go').onclick = () => {
   $('menu').hidden = true; $('hud').hidden = false; GAME.running = true; getUp(); setCam(CAM.mode);
-  if (IS_MOBILE && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+  if (IS_MOBILE) {
+    const d = document.documentElement;
+    if (document.fullscreenElement || !d.requestFullscreen) lockLandscape();
+    else d.requestFullscreen({ navigationUI: 'hide' }).then(lockLandscape).catch(lockLandscape);
+  }
+  setTimeout(updateRotHint, 600);
 };
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); sprayMat.uniforms.uScale.value = innerHeight * 0.5; });
 
