@@ -1489,21 +1489,26 @@ function updateCamera(dt) {
 // intro (con el menú): planos que van cambiando: el patrón al volante, el rider de cerca y una general con el Pantalán
 const INTRO = { shot: -1, t: 0 };
 function introCamera(dt, rp, toBoat) {
-  INTRO.t += dt;
-  const shot = Math.floor(INTRO.t / 7) % 3, cut = shot !== INTRO.shot; INTRO.shot = shot;
   const want = tmp.c, look = tmp.n;
   const portrait = camera.aspect < 1, side = V3(-toBoat.z, 0, toBoat.x);
+  if (!READY.on) {             // cargando: el Pantalán desde el agua, con un barrido lento
+    const a = GAME.t * 0.03;
+    want.set(PIER_X - 260, 14, SHORE_Z - 520); look.set(PIER_X + Math.sin(a) * 60, 6 - (portrait ? 14 : 0), SHORE_Z - 760 + Math.cos(a) * 120);
+    camera.position.copy(want); camera.lookAt(look); return;
+  }
+  INTRO.t += dt;
+  const shot = Math.floor(INTRO.t / 7) % 3; INTRO.shot = shot;
   if (shot === 0) {            // el patrón al volante, desde arriba y por delante de estribor
     boat.updateMatrixWorld(true);
     want.copy(boat.localToWorld(V3(-3.2, 2.1, 1.2))); look.copy(boat.localToWorld(V3(-0.5, 1.25, -0.35)));
   } else if (shot === 1) {     // el rider de cerca, de tres cuartos por delante
     want.copy(rp).addScaledVector(CAM.chest, 3.8).addScaledVector(toBoat, 2.4).add(V3(0, 1.6, 0)); look.copy(rp).setY(rp.y + 1.0);
-  } else {                     // general alta desde detrás: rider delante, la cuerda, la barca y la costa al fondo
-    const mid = V3().lerpVectors(rp, towW, 0.5);
-    want.copy(rp).addScaledVector(toBoat, -9).addScaledVector(side, 5).add(V3(0, 7, 0)); look.copy(mid).setY(0.5);
+  } else {                     // la Tatanka de cerca, de tres cuartos por la proa de estribor
+    boat.updateMatrixWorld(true);
+    want.copy(boat.localToWorld(V3(-5.5, 2.4, 7.5))); look.copy(boat.localToWorld(V3(0, 0.9, 0.6)));
   }
   // en vertical el menú tapa la mitad de abajo: se apunta más bajo para que barca y rider queden arriba
-  if (portrait) look.y -= shot === 2 ? 7 : 2.6;
+  if (portrait) look.y -= shot === 2 ? 3.2 : 2.6;
   // la cámara va pegada a lo que filma (se mueve a 37 km/h): si se suavizara se quedaría atrás
   CAM.pos.copy(want); CAM.look.copy(look);
   camera.position.copy(CAM.pos); camera.lookAt(CAM.look);
@@ -1593,27 +1598,38 @@ function handWorld(out) {
   else out.addVectors(pl, pr).multiplyScalar(0.5);
   return true;
 }
+const MODEL_VER = '?v=3';   // cambiarlo al reexportar los .glb (así el móvil no los descarga cada vez)
 async function loadModels() {
-  const v = '?v=' + Date.now();
-  const SIZES = { senen: 7.7e6, tatanka: 1.4e6, rupert: 8.7e6, rupert_patron: 8.5e6 };
-  const [sen, tat, rup, pat] = await Promise.all(['senen', 'tatanka', 'rupert', 'rupert_patron'].map(n => loadGLB(n + '.glb' + v, SIZES[n])));
+  const v = MODEL_VER;
+  const SIZES = { senen: 2.8e6, tatanka: 1.4e6, rupert: 3.7e6, rupert_patron: 3.6e6 };
+  // las fotos del menú primero (si no, las tapan las descargas de los modelos)
+  await Promise.all(['avatar.jpg', 'avatar-rupert.jpg'].map(u => new Promise(r => { const i = new Image(); i.onload = i.onerror = r; i.src = u; setTimeout(r, 3000); })));
+  const [sen, tat, pat] = await Promise.all(['senen', 'tatanka', 'rupert_patron'].map(n => loadGLB(n + '.glb' + v, SIZES[n])));
   if (tat) {
     boat.remove(BOAT.model); BOAT.model = tat.scene; boat.add(tat.scene);
     tat.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     const tp = tat.scene.getObjectByName('remolque');
     if (tp) { boat.updateMatrixWorld(true); BOAT.towLocal.copy(boat.worldToLocal(tp.getWorldPosition(V3()))); }
   }
-  for (const [name, g] of [['senen', sen], ['rupert', rup]]) { const h = g && setupHuman(g); if (h) RIDERS[name] = h; }
+  { const h = sen && setupHuman(sen); if (h) RIDERS.senen = h; }
   setRider(RIDER_NAME);
   // Rupert de patrón: de pie al volante de la Tatanka, con las manos en la rueda
   // (cuando Rupert hace wake, conduce Senén)
   const hd = pat && setupHuman(pat), hs = sen && setupHuman({ scene: T.SkeletonUtils.clone(sen.scene) });
   for (const [n, h] of [['rupert', hd], ['senen', hs]]) if (h) { DRIVERS[n] = h; h.root.position.copy(DRIVER.at); h.root.visible = false; boat.add(h.root); }
   setDriver(RIDER_NAME === 'rupert' ? 'senen' : 'rupert');
-  const ok = sen && tat && rup && pat;
+  const ok = sen && tat && pat;
   $('loadLine').textContent = ok ? '✅ Barca y riders listos' : '⚠️ No se han podido cargar todos los modelos: recarga la página';
   $('go').disabled = !ok && !sen;
+  showModels(); READY.t = GAME.t;
+  // Rupert de rider: se baja mientras tanto (si lo eligen antes, sigue Senén hasta que llega)
+  const rup = await new Promise(res => loader.load('rupert.glb' + v, res, undefined, () => res(null)));
+  const h = rup && setupHuman(rup); if (h) { RIDERS.rupert = h; if (RIDER_NAME === 'rupert') setRider('rupert'); }
 }
+// mientras cargan no se enseñan ni el maniquí ni la barca provisional: se ve el Pantalán
+const READY = { on: false, t: 0, shots: false };
+function showModels() { READY.on = true; for (const o of [riderRoot, rope, handleMesh, boat]) o.visible = true; }
+for (const o of [riderRoot, rope, handleMesh, boat]) o.visible = false;
 const RIDERS = {}, DRIVERS = {}; let RIDER_NAME = 'senen';
 function setDriver(n) { for (const k in DRIVERS) DRIVERS[k].root.visible = k === n; DRIVER.h = DRIVERS[n] || null; }
 function setRider(name) {
@@ -1671,6 +1687,48 @@ $('go').onclick = () => {
 };
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); sprayMat.uniforms.uScale.value = innerHeight * 0.5; });
 
+// =====================================================================================
+//  FOTOS 3D DEL MENÚ: las tablas y los riders, renderizados con el mismo motor del juego
+// =====================================================================================
+const snapC = document.createElement('canvas');
+function snapshot(sc, cam, w, h) {
+  const pr = renderer.getPixelRatio(), cv = renderer.domElement;
+  w = Math.min(w, innerWidth); h = Math.min(h, innerHeight);
+  cam.aspect = w / h; cam.updateProjectionMatrix();
+  renderer.setScissorTest(true); renderer.setViewport(0, 0, w, h); renderer.setScissor(0, 0, w, h);
+  renderer.render(sc, cam);
+  snapC.width = Math.round(w * pr); snapC.height = Math.round(h * pr);
+  snapC.getContext('2d').drawImage(cv, 0, cv.height - snapC.height, snapC.width, snapC.height, 0, 0, snapC.width, snapC.height);
+  renderer.setScissorTest(false); renderer.setViewport(0, 0, innerWidth, innerHeight);
+  return snapC.toDataURL('image/jpeg', 0.88);
+}
+function boardShots() {
+  const sc = new T.Scene(); sc.environment = scene.environment; sc.background = new T.Color(0x16202e);
+  const l = new T.DirectionalLight(0xffffff, 2.6); l.position.set(1.5, 3, 2); sc.add(l, new T.HemisphereLight(0xdfeaff, 0x223040, 0.6));
+  const cam = new T.PerspectiveCamera(26, 2, 0.05, 20);
+  BOARDS.forEach((b, i) => {
+    const m = b.clone(); m.rotation.set(0.32, -0.28, 0.06); sc.add(m);
+    cam.position.set(0.04, 1.25, 1.2); cam.lookAt(0, 0.03, 0);
+    const url = snapshot(sc, cam, 360, 170); sc.remove(m);
+    const sw = document.querySelector(`#boards .opt[data-b="${i}"] .swatch`); if (sw) { sw.style.background = `#16202e url(${url}) center/cover`; sw.classList.add('shot'); }
+  });
+}
+// los riders en el agua, de cuerpo entero y de tres cuartos (se hace una vez, cuando ya van surcando)
+function riderShots() {
+  const cam = new T.PerspectiveCamera(34, 0.8, 0.1, 3000), keep = RIDER_NAME, rp = riderRoot.position;
+  const toBoat = V3().subVectors(towW, rp).setY(0).normalize();
+  for (const name of ['senen', 'rupert']) {
+    if (!RIDERS[name]) continue;
+    setRider(name); poseBody(J); riderRoot.updateMatrixWorld(true);
+    cam.position.copy(rp).addScaledVector(CAM.chest, 2.5).addScaledVector(toBoat, 1.2).add(V3(0, 1.15, 0));
+    cam.lookAt(rp.x, rp.y + 0.85, rp.z);
+    const url = snapshot(scene, cam, 280, 350);
+    const pt = document.querySelector(`#riders .opt[data-r="${name}"] .portrait`);
+    if (pt) { pt.style.backgroundImage = `url(${url})`; pt.classList.add('shot'); }
+  }
+  setRider(keep); poseBody(J);
+}
+
 const clock = new T.Clock();
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -1691,12 +1749,17 @@ function frame() {
   waterNear.position.set(Math.round(rp.x / 2) * 2, 0, Math.round(rp.z / 2) * 2);
   sun.position.copy(rp).addScaledVector(SUN_DIR, 80); sun.target.position.copy(rp); sun.target.updateMatrixWorld();
   sky.position.copy(camera.position);
+  if (READY.on && !READY.shots && RIDERS.rupert && GAME.t - READY.t > 2 && RIDER.state === 'ride') {
+    READY.shots = true; try { riderShots(); } catch (e) { console.warn(e); }
+    camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 // en el menú: la barca ya navega y la cámara la sigue
 updateBoat(0, 0); RIDER.theta = 0.05; updateRider(0.016, 0);
 CAM.pos.copy(riderRoot.position).add(V3(-8, 4, -8));
+try { boardShots(); } catch (e) { console.warn(e); }
 loadModels();
 $('load').textContent = '';
 frame();

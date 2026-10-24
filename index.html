@@ -112,6 +112,10 @@
   .portrait { display: block; width: 100%; aspect-ratio: 4/5; object-fit: cover; background: rgba(247,243,234,.08) center/cover; margin-bottom: 4px; }
   .opt.card.sel .portrait { outline: 2px solid var(--sun); }
   .swatch { display: block; height: 34px; margin-bottom: 4px; }
+  .swatch.shot { height: auto; aspect-ratio: 36/17; }
+  .portrait { position: relative; }
+  .portrait .face { display: none; position: absolute; right: 6px; bottom: 6px; width: 34%; aspect-ratio: 1; border-radius: 50%; border: 2px solid var(--paper); background: center/cover; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+  .portrait.shot .face { display: block; }
   .ctl { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 14px; font-size: 16px; align-items: center; background: rgba(13,22,32,.62); padding: 12px 14px; }
   .ctl .h { font-family: var(--stamp); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; opacity: .8; }
   .ctl b { font-weight: 700; white-space: nowrap; }
@@ -162,8 +166,8 @@
     <div class="ptitle">Elige rider</div>
     <div class="psub">El otro lleva la barca</div>
     <div class="cards" id="riders">
-      <button class="opt card sel" data-r="senen"><span class="portrait" style="background-image:url(avatar.jpg)"></span><b>Senén</b><em>Chaleco gris, amarillo y azul · tatuaje tribal</em></button>
-      <button class="opt card" data-r="rupert"><span class="portrait" style="background-image:url(avatar-rupert.jpg)"></span><b>Rupert</b><em>Camiseta negra · ancla en el antebrazo</em></button>
+      <button class="opt card sel" data-r="senen"><span class="portrait" style="background-image:url(avatar.jpg)"><i class="face" style="background-image:url(avatar.jpg)"></i></span><b>Senén</b><em>Chaleco gris, amarillo y azul · tatuaje tribal</em></button>
+      <button class="opt card" data-r="rupert"><span class="portrait" style="background-image:url(avatar-rupert.jpg)"><i class="face" style="background-image:url(avatar-rupert.jpg)"></i></span><b>Rupert</b><em>Camiseta negra · ancla en el antebrazo</em></button>
     </div>
     <div class="ptitle" style="font-size:30px">Tabla</div>
     <div class="cards three" id="boards">
