@@ -762,31 +762,41 @@ let poseBody = poseDummy;   // se sustituye al cargar senen.glb
 // ---- postura del rider en el espacio de la tabla
 const J = {}; for (const k of ['hB', 'hF', 'kB', 'kF', 'fB', 'fF', 'ch', 'hd', 'sB', 'sF', 'eB', 'eF', 'aB', 'aF', 'fw', 'handle', 'toeB', 'toeF']) J[k] = V3();
 // c: flexión (0 de pie .. 1 encogido) · lean: + hacia los dedos, - hacia los talones · grab: tipo y fuerza
-function computePose(c, lean, grab, grabK, handleOn, raley = 0) {
+// movimiento vivo del cuerpo: amortiguación de las piernas (muelle), tensión de la cuerda, giro y respiración
+const DYN = { t: 0, absorb: 0, absVel: 0, tension: 0, spin: 0, air: 0, prevSH: 0, prevVs: 0 };
+// sb: hacia qué lado de la tabla está la barca (+1 en regular, la punta; -1 en switch, la cola)
+function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
+  const D = DYN, ride = 1 - D.air;
+  c = clamp(c + D.absorb, 0, 1);
+  const tens = D.tension * ride, breathe = Math.sin(D.t * 2.1) * 0.008, chop = Math.sin(D.t * 3.3) * 0.012 * ride;
   const hy = lerp(0.93, 0.5, c) - Math.abs(lean) * 0.05;
   const hz = -0.06 - 0.1 * c + lean * 0.22;
   J.fF.set(0.27, 0.09, 0); J.fB.set(-0.27, 0.09, 0);
   J.toeF.set(0.3, 0.09, 0.16); J.toeB.set(-0.24, 0.09, 0.16);
   const kz = 0.1 + 0.25 * c + Math.max(0, lean) * 0.1, ky = lerp(0.5, 0.42, c);
-  J.kF.set(0.29, ky, kz); J.kB.set(-0.25, ky, kz);
+  J.kF.set(0.29, ky, kz + chop); J.kB.set(-0.25, ky, kz - chop);
   // cadera algo atrasada respecto a la barca (+X): el rider se cuelga de la cuerda
-  J.hF.set(0.04, hy, hz); J.hB.set(-0.18, hy, hz);
-  const tw = 0.55;                                   // hombros abiertos hacia la barca
+  const hipBack = (0.07 + 0.08 * tens) * sb;
+  J.hF.set(-hipBack + 0.11, hy, hz); J.hB.set(-hipBack - 0.11, hy, hz);
+  const tw = 0.85;                                   // hombros bien abiertos hacia la barca: los dos brazos a la vista
   const fwd = lerp(0.04, 0.3, c) + Math.max(0, lean) * 0.12;
-  J.ch.set(-0.16 - 0.06 * (1 - c), hy + lerp(0.45, 0.36, c), hz + fwd);
-  J.fw.set(Math.sin(tw), 0, Math.cos(tw)).normalize();
-  const sl = V3(Math.cos(tw), 0, -Math.sin(tw)).multiplyScalar(0.19);
+  J.ch.set((-0.16 - 0.06 * (1 - c) - 0.14 * tens) * sb, hy + lerp(0.45, 0.36, c) + breathe, hz + fwd);
+  J.fw.set(Math.sin(tw) * sb, 0, Math.cos(tw)).normalize();
+  const sl = V3(Math.cos(tw), 0, -Math.sin(tw) * sb).multiplyScalar(0.19);
   J.sF.copy(J.ch).add(sl).add(V3(0, 0.04, 0)); J.sB.copy(J.ch).sub(sl).add(V3(0, 0.04, 0));
-  J.hd.copy(J.ch).add(V3(0.05, 0.27, 0.03 + fwd * 0.2));
+  J.hd.copy(J.ch).add(V3((0.05 + 0.04 * tens) * sb + Math.sin(D.t * 0.7) * 0.02, 0.27, 0.03 + fwd * 0.2 + Math.sin(D.t * 0.43) * 0.015));
   // la maneta a la altura de la cadera delantera, hacia la barca
-  J.handle.set(0.34, hy + 0.02, hz + 0.22 + fwd * 0.4);
+  const pull = 0.5 + 0.1 * tens - 0.25 * D.spin;
+  J.handle.set(pull * sb, hy - 0.05 + 0.1 * D.spin, hz + 0.22 + fwd * 0.4 - 0.08 * D.spin);
   J.aF.copy(J.handle).add(V3(0, 0, -0.1)); J.aB.copy(J.handle).add(V3(0, 0, 0.1));
   if (grab && grabK > 0) {
     const GP = { indy: [V3(0.02, 0.1, 0.22), 'B'], nose: [V3(0.6, 0.1, 0.0), 'F'], tail: [V3(-0.6, 0.12, 0.0), 'B'], stale: [V3(-0.05, 0.1, -0.22), 'B'] }[grab];
     if (GP) { const hand = GP[1] === 'F' ? J.aF : J.aB; hand.lerp(GP[0], grabK); if (GP[1] === 'F') J.aB.copy(J.handle); else J.aF.copy(J.handle); }
   }
   if (!handleOn) { J.aF.copy(J.sF).add(V3(0.1, -0.45, 0.25)); J.aB.copy(J.sB).add(V3(-0.15, -0.4, 0.3)); }
-  J.eF.lerpVectors(J.sF, J.aF, 0.5).add(V3(0, -0.06, 0.05)); J.eB.lerpVectors(J.sB, J.aB, 0.5).add(V3(0, -0.06, 0.05));
+  // codos: casi rectos cuando tira la cuerda, más doblados cuando está suelta o en los giros
+  const bend = 0.04 - 0.03 * tens + 0.08 * D.spin;
+  J.eF.lerpVectors(J.sF, J.aF, 0.5).add(V3(0, -bend, 0.05 + bend * 0.4)); J.eB.lerpVectors(J.sB, J.aB, 0.5).add(V3(0, -bend, 0.05 + bend * 0.4));
 }
 
 // cuerda y maneta
@@ -1122,6 +1132,7 @@ function land() {
   say(`${name}<small>+${pts.toLocaleString('es-ES')}</small>`, '', 1.9);
   landLabel(result === 'clean' ? 'CLEAN LANDING' : 'SKETCHY −10%', result);
   if (halfTurns % 2) R.sw = !R.sw;
+  DYN.absVel += 1.6 + Math.min(2, -R.vy * 0.15);   // las piernas se comen el golpe
   R.state = 'ride'; R.vy = 0; R.air = null; R.y = 0;
   emitBurst(R.pos.x, R.pos.z, 34, 1.6);
 }
@@ -1325,10 +1336,20 @@ function updateRider(dt, t) {
       emit(tmp.a.x, tmp.a.y, tmp.a.z, -tmp.c.x * latV * 0.35 + rnd(-0.6, 0.6), rnd(0.8, 1.8) + sp * 0.12, -tmp.c.z * latV * 0.35 + rnd(-0.6, 0.6), rnd(0.12, 0.28), rnd(0.4, 0.8));
     }
   }
+  // --- movimiento vivo: las piernas absorben la ola como un muelle, la cuerda tira al carvear
+  DYN.t += dt;
+  const vs = (sH - DYN.prevSH) / Math.max(dt, 1e-4); DYN.prevSH = sH;
+  if (R.state === 'ride') DYN.absVel += clamp((vs - DYN.prevVs) * 0.05, -0.6, 0.6);
+  DYN.prevVs = vs;
+  DYN.absVel += (-55 * DYN.absorb - 9 * DYN.absVel) * dt; DYN.absorb = clamp(DYN.absorb + DYN.absVel * dt, -0.25, 0.45);
+  DYN.tension = lerp(DYN.tension, R.state === 'ride' ? clamp(Math.abs(R.omega) * ROPE / 6, 0, 1) : 0, clamp(dt * 3, 0, 1));
+  DYN.air = lerp(DYN.air, R.state === 'air' ? 1 : 0, clamp(dt * 8, 0, 1));
+  DYN.spin = lerp(DYN.spin, R.state === 'air' && R.air && (R.air.spinning || R.air.flipping || R.air.autoSpin) ? 1 : 0, clamp(dt * 6, 0, 1));
+  if (R.state === 'air' && R.air && !R.air.grab && R.vy < 0 && R.y - sH < 0.7) R.crouch = lerp(R.crouch, 0.3, clamp(dt * 10, 0, 1));   // estira las piernas antes de caer
   // --- postura y cuerpo
   const a = R.air;
   const gp = a && a.grab ? ({ japan: 'indy', method: 'stale', fashion: 'stale' }[a.grab] || a.grab) : null;
-  computePose(R.crouch, R.state === 'air' ? 0 : R.lean, gp, gp ? 1 : 0, R.state !== 'fallen', a ? a.raley : 0);
+  computePose(R.crouch, R.state === 'air' ? 0 : R.lean, gp, gp ? 1 : 0, R.state !== 'fallen', a ? a.raley : 0, R.sw ? -1 : 1);
   poseBody(J);
   // --- cuerda: del punto de remolque de la torre a la maneta (que está en las manos de verdad)
   riderRoot.updateMatrixWorld(true);
@@ -1389,7 +1410,9 @@ function updateCamera(dt) {
   const toBoat = tmp.a.set(towW.x - rp.x, 0, towW.z - rp.z).normalize();
   const side = tmp.b.set(-toBoat.z, 0, toBoat.x);
   const want = tmp.c, look = tmp.n;
-  if (CAM.mode === 0) { want.copy(rp).addScaledVector(toBoat, -7.5).add(V3(0, 3.4, 0)).addScaledVector(side, R.theta * 2.5); look.lerpVectors(rp, towW, 0.32).setY(1.1); }
+  // como en Pocket Shredders: detrás y algo ladeada hacia el pecho del rider, para verle los brazos y la maneta
+  chestWorld(tmp.p2 = tmp.p2 || V3()); CAM.chest = (CAM.chest || V3()).lerp(tmp.p2, clamp(dt * 1.5, 0, 1));
+  if (CAM.mode === 0) { want.copy(rp).addScaledVector(toBoat, -7.2).add(V3(0, 3.2, 0)).addScaledVector(CAM.chest, 2.8); look.lerpVectors(rp, towW, 0.3).setY(1.1); }
   else if (CAM.mode === 1) { want.copy(rp).addScaledVector(toBoat, -4.6).add(V3(0, 1.3, 0)).addScaledVector(side, 1.2); look.lerpVectors(rp, towW, 0.25).setY(1.0); }
   else if (CAM.mode === 2) { want.copy(towW).add(V3(0, 0.4, 0)).addScaledVector(toBoat, 0.6); look.copy(rp).setY(rp.y + 0.9); }
   else { want.copy(rp).addScaledVector(side, -9).addScaledVector(toBoat, 2).add(V3(0, 2.0, 0)); look.copy(rp).setY(rp.y + 0.9).addScaledVector(toBoat, 2); }
