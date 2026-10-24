@@ -1220,6 +1220,7 @@ function land() {
   pts = Math.round(pts / 10) * 10;
   R.score += pts; $('score').textContent = R.score.toLocaleString('es-ES');
   if (pts > (REC.bestTrickPts || 0)) { REC.bestTrickPts = pts; REC.bestTrick = name; }
+  SESSION.tricks++; if (pts > SESSION.bestPts) { SESSION.bestPts = pts; SESSION.best = name; }
   // Banger: los trucos de estela lo llenan (los difíciles más rápido, los ollies casi nada)
   if (a.kind === 'wake' || a.kind === 'ollie') R.banger = Math.min(1, R.banger + (a.kind === 'ollie' ? 0.02 : clamp(value / 2400, 0.05, 0.45)));
   if (R.banger >= 1 && !R.bangerOn) { R.bangerOn = true; msg('BANGER', 1.2); }
@@ -1806,7 +1807,7 @@ function netMenu() {
   if (NET.connected) $('mpMenu').textContent = ps.length ? `🌊 Sala Tatanka · ${ps.length + 1} conectados: tú, ${names.join(', ')}` : '🌊 Sala Tatanka · de momento solo tú (pasa el enlace a tus amigos)';
   // marcador en el juego
   let box = $('mpList');
-  if (!box) { box = document.createElement('div'); box.id = 'mpList'; box.style.cssText = 'position:absolute;right:max(14px,env(safe-area-inset-right));top:74px;text-align:right;font:700 12px/1.45 system-ui,sans-serif;letter-spacing:.04em;text-shadow:0 1px 4px rgba(0,0,0,.7);pointer-events:none'; $('hud').appendChild(box); }
+  if (!box) { box = document.createElement('div'); box.id = 'mpList'; box.style.cssText = 'position:absolute;right:max(14px,env(safe-area-inset-right));top:96px;text-align:right;font:700 12px/1.45 system-ui,sans-serif;letter-spacing:.04em;text-shadow:0 1px 4px rgba(0,0,0,.7);pointer-events:none'; $('hud').appendChild(box); }
   const rows = ps.filter(P => P.st.p).map(P => `${esc(P.st.n || 'Rider')} · ${(P.st.s || 0).toLocaleString('es-ES')}`);
   box.innerHTML = rows.join('<br>');
 }
@@ -2078,7 +2079,7 @@ document.querySelectorAll('#patrons .opt').forEach(b => b.onclick = () => {
   PATRON = b.dataset.p; try { localStorage.setItem('wake-patron', PATRON); } catch (e) {}
   pickPatron();
 });
-function showPanel(id) { for (const p of ['pMain', 'pChars', 'pControls', 'pStats']) if ($(p)) $(p).hidden = p !== id; }
+function showPanel(id) { for (const p of ['pMain', 'pChars', 'pControls', 'pStats', 'pResult']) if ($(p)) $(p).hidden = p !== id; }
 $('toChars').onclick = () => showPanel('pChars'); $('charsOk').onclick = () => showPanel('pMain');
 $('toControls').onclick = () => showPanel('pControls'); $('controlsOk').onclick = () => showPanel('pMain');
 $('camBtn').onclick = () => { setCam((CAM.mode + 1) % CAM.names.length); $('camBtn').textContent = 'Cámara: ' + CAM.names[CAM.mode].toLowerCase(); };
@@ -2094,8 +2095,44 @@ addEventListener('pointerup', autoFullscreen, true); addEventListener('touchend'
 $('fsBtn').onclick = () => { const d = document.documentElement; if (document.fullscreenElement) document.exitFullscreen(); else if (d.requestFullscreen) d.requestFullscreen().catch(() => {}); };
 try { const n = localStorage.getItem('wake-nick'); if (n) $('nick').value = n; } catch (e) {}
 $('nick').addEventListener('input', () => { try { localStorage.setItem('wake-nick', $('nick').value.trim()); } catch (e) {} });
+// ---- SESIONES de 2 minutos y medio: al acabar, la puntuación, el mejor truco y el récord
+const SESSION = { len: 150, t: 0, tricks: 0, best: '', bestPts: 0 };
+{ const tm = document.createElement('div'); tm.id = 'timer';
+  tm.style.cssText = 'position:absolute;right:max(14px,env(safe-area-inset-right));top:calc(62px + env(safe-area-inset-top));font:800 20px/1 system-ui,sans-serif;letter-spacing:.06em;text-shadow:0 2px 6px rgba(0,0,0,.6);pointer-events:none';
+  $('hud').appendChild(tm);
+  const pn = document.createElement('div'); pn.className = 'panel wide'; pn.id = 'pResult'; pn.hidden = true;
+  pn.innerHTML = `<div class="ptitle">¡Sesión terminada!</div><div class="rec" id="resBox"></div>
+    <nav class="mainmenu"><button class="btn" id="again">Otra sesión</button><button class="mbtn" id="resMenu">Menú</button></nav>`;
+  $('pMain').after(pn); }
+function startSession() {
+  const R = RIDER; R.score = 0; R.history = {}; $('score').textContent = '0';
+  REC.lastScore = 0; REC.counted = false; REC.bestTrick = ''; REC.bestTrickPts = 0;
+  SESSION.t = SESSION.len; SESSION.tricks = 0; SESSION.best = ''; SESSION.bestPts = 0;
+}
+function tickSession(dt) {
+  SESSION.t -= dt;
+  const s_ = Math.max(0, Math.ceil(SESSION.t)), el = $('timer');
+  el.textContent = `${Math.floor(s_ / 60)}:${String(s_ % 60).padStart(2, '0')}`;
+  el.style.color = s_ <= 10 ? '#ff5a4e' : '#fff';
+  if (SESSION.t <= 0 && RIDER.state !== 'air') endSession();      // si va en el aire, se espera a que caiga
+}
+function endSession() {
+  const R = RIDER, prev = (REC.data && REC.data.best) || 0, sc = R.score;
+  recSave();                                                       // se guarda con el juego aún en marcha
+  GAME.running = false; $('hud').hidden = true; $('menu').hidden = false; showPanel('pResult');
+  const list = Object.entries(REC.all || {}).map(([k, v]) => ({ me: k === REC.dev, best: k === REC.dev ? Math.max(sc, prev) : ((v.st || {}).best || 0) })).sort((a, b) => b.best - a.best);
+  const pos = list.findIndex(v => v.me) + 1, fmt = v => (v || 0).toLocaleString('es-ES');
+  $('resBox').innerHTML = `<b>Puntos</b><span style="font:400 34px var(--display, sans-serif)">${fmt(sc)}</span>
+    <b>Mejor truco</b><span>${SESSION.best ? esc(SESSION.best) + ' · ' + fmt(SESSION.bestPts) : '—'}</span>
+    <b>Trucos</b><span>${SESSION.tricks}</span>
+    <b>Tu récord</b><span>${sc > prev ? '🏆 ¡Nuevo récord! (antes ' + fmt(prev) + ')' : fmt(prev)}</span>
+    ${pos ? `<b>Ranking</b><span>${pos}º de ${list.length}</span>` : ''}`;
+  msg('');
+}
+$('again').onclick = () => $('go').onclick();
+$('resMenu').onclick = () => showPanel('pMain');
 $('go').onclick = () => {
-  pickLane();
+  pickLane(); startSession();
   $('menu').hidden = true; $('hud').hidden = false; GAME.running = true; getUp(); setCam(CAM.mode);
   if (IS_MOBILE) {
     const d = document.documentElement;
@@ -2163,6 +2200,7 @@ function frame() {
     checkPush(); drawPushBtn();
     netSend(dt);
     if (GAME.running) recTick(dt);
+    if (GAME.running) tickSession(dt);
     $('speed').textContent = `${Math.round(BOAT.speed * 3.6)} KM/H · CUERDA ${ROPE.toFixed(0)} M`;
   }
   if (!window.__freeCam) updateCamera(dt);   // __freeCam: cámara libre para revisar el escenario
