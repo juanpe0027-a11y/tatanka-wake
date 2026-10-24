@@ -983,6 +983,9 @@ function stickSVG(words) {
 }
 $('stL').innerHTML = stickSVG(['', 'CARVE', '', 'CARVE']).replace('id="__land"', 'id="landL"').replace('<i class="knob"></i>', '<i class="knob">L</i>');   // dirección
 $('stR').innerHTML = stickSVG(['SPIN', 'ROLL', 'SPIN', 'ROLL']).replace('id="__land"', 'id="landR"').replace('<i class="knob"></i>', '<i class="knob">OLLIE</i>');   // centro: agacharse y saltar
+// la posición se pone aquí también: si el móvil tiene guardado un index.html viejo, el círculo de la dirección seguiría a la derecha
+Object.assign($('stL').style, { left: 'max(18px, env(safe-area-inset-left))', right: 'auto' });
+Object.assign($('stR').style, { right: 'max(18px, env(safe-area-inset-right))', left: 'auto' });
 function drawSticks(S) {
   for (const [id, s] of [['stL', S.L], ['stR', S.R]]) {
     const k = $(id).querySelector('.knob'); k.style.transform = `translate(${(s.x * 40).toFixed(1)}px, ${(-s.y * 40).toFixed(1)}px)`;
