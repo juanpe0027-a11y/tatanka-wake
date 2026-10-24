@@ -920,15 +920,22 @@ addEventListener('pointerdown', e => {
   if (!GAME.running || e.target.closest('button') || e.target.closest('#stance')) return;
   const side = e.clientX < innerWidth / 2 ? 'L' : 'R';   // izquierda = dirección, derecha = agacharse / saltar y giros
   for (const [, t] of touches) if (t.side === side) return;
-  touches.set(e.pointerId, { side, x0: e.clientX, y0: e.clientY });
+  // el círculo derecho va por posición: pulsar encima de SPIN o ROLL ya es el truco, sin arrastrar
+  // (si se toca lejos del círculo, cuenta desde donde se puso el dedo)
+  const b = $('stR').getBoundingClientRect(), cx = b.left + b.width / 2, cy = b.top + b.height / 2, rad = b.width * 0.47;
+  const abs = side === 'R' && Math.hypot(e.clientX - cx, e.clientY - cy) < rad * 1.6;
+  const t = abs ? { side, x0: cx, y0: cy, rad } : { side, x0: e.clientX, y0: e.clientY, rad: STICK_R };
+  touches.set(e.pointerId, t);
   stickTouchStart(side);
+  if (abs) moveStick(t, e);
 });
-addEventListener('pointermove', e => {
-  const t = touches.get(e.pointerId); if (!t) return;
-  let dx = (e.clientX - t.x0) / STICK_R, dy = -(e.clientY - t.y0) / STICK_R;
+function moveStick(t, e) {
+  let dx = (e.clientX - t.x0) / t.rad, dy = -(e.clientY - t.y0) / t.rad;
   const l = Math.hypot(dx, dy); if (l > 1) { dx /= l; dy /= l; }
+  if (l < 0.3) { dx = 0; dy = 0; }                       // el centro (OLLIE) no apunta a ningún truco
   IN[t.side].x = dx; IN[t.side].y = dy; trackCircle(IN[t.side]);
-});
+}
+addEventListener('pointermove', e => { const t = touches.get(e.pointerId); if (t) moveStick(t, e); });
 const endTouch = e => { const t = touches.get(e.pointerId); if (!t) return; touches.delete(e.pointerId); stickTouchEnd(t.side); };
 addEventListener('pointerup', endTouch); addEventListener('pointercancel', endTouch);
 addEventListener('keydown', e => {
@@ -959,7 +966,7 @@ function readSticks() {
   // Espacio = el centro del stick derecho: mantener agacha, soltar salta
   if (k.Space) prevSpace = true; else if (prevSpace) { prevSpace = false; R.rel = { x: 0, y: k.KeyR ? -1 : 0, circled: false }; }
   // Riding: ← → carvean (soltar la flecha = pop) · Espacio ollie. Grabs: G (+ flechas para el tweak), O la otra mano
-  if (!air) { if (k.ArrowLeft) L.x = -1; if (k.ArrowRight) L.x = 1; }
+  if (!air) { if (k.ArrowLeft) L.x = -1; if (k.ArrowRight) L.x = 1; if (k.ArrowUp) L.y = 1; }
   if (air && k.KeyG) {
     L.y = 1; L.x = 0;                                   // G solo = Indy
     if (k.ArrowUp) { L.y = 1; L.x = 0; } if (k.ArrowDown) { L.y = -1; L.x = 0; }
@@ -1261,6 +1268,10 @@ function updateRider(dt, t) {
     // --- en el agua: tap R arma Flip/Raley, círculo con R = mano envuelta, círculo con L = surface 180, tap L = la otra mano
     if (S.R.circle) { R.wrapped = R.wrapped && Math.sign(S.R.circle) !== R.wrapped ? 0 : S.R.circle; say(R.wrapped ? 'Handle wrapped' : 'Unwrapped', '', 0.9); }
     if (S.L.circle) surface180();
+    // círculo izquierdo hacia arriba: cambia la punta de la tabla (surface 180, se invierten los pies)
+    const upL = S.L.y > 0.7 && S.L.y > Math.abs(S.L.x) * 1.5;
+    if (upL && !R.upHeld) surface180();
+    R.upHeld = upL;
     if (S.L.tap || IN.kbOther) R.otherHand = !R.otherHand && !IN.kbOther ? true : (IN.kbOther ? true : false);
     // --- pop: mantener el centro del stick derecho (se agacha) y soltarlo. En la cresta salta la estela, en plano es un ollie.
     //     Soltarlo arrastrado abajo = raley, arriba (de talones) = whirly
