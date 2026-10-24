@@ -493,12 +493,7 @@ const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
   const conc = MAT(0xbab4a8, 0.95), concDark = MAT(0x8d877d, 0.95);
   const PX = PIER_X;   // el puerto industrial queda detrás del Pantalán
   box(900, 4, 700, conc, PX + 840, -0.5, -120, world, false);                    // muelles ganados al mar
-  box(30, 6, 1300, concDark, PX + 400, 0, -480, world, false);                   // dique de abrigo
-  {
-    const rockG = new T.DodecahedronGeometry(1, 0), n = 1400, rocks = new T.InstancedMesh(rockG, MAT(0x8a7a66, 0.95), n), o = new T.Object3D();
-    for (let i = 0; i < n; i++) { o.position.set(PX + 382 + rnd(-6, 4), rnd(-1, 2.5), rnd(-1130, 170)); o.rotation.set(rnd(0, 6), rnd(0, 6), rnd(0, 6)); const s = rnd(1.4, 3.2); o.scale.set(s, s * 0.8, s); o.updateMatrix(); rocks.setMatrixAt(i, o.matrix); }
-    world.add(rocks);
-  }
+  // (entre el Pantalán y el puerto solo hay mar abierto: sin dique, como en la foto del dron)
   // ---- espigón curvo de la playa: sale de la orilla y se dobla hacia el Pantalán
   {
     const n = 700, rocks = new T.InstancedMesh(new T.DodecahedronGeometry(1, 0), MAT(0x8f7f69, 0.95), n), o = new T.Object3D();
