@@ -1245,7 +1245,7 @@ function sfxUpdate() {
   SFX.carve.g.gain.setTargetAtTime(cv, t, 0.08);
   SFX.carve.f.frequency.setTargetAtTime(1300 + lat * 120, t, 0.1);
   SFX.engine.gain.setTargetAtTime(GAME.paused ? 0 : (CAM.mode === 2 ? 0.07 : 0.035), t, 0.3);
-  SFX.master.gain.setTargetAtTime(SFX.on && !GAME.paused ? 0.9 : 0, t, 0.05);
+  SFX.master.gain.setTargetAtTime(SFX.on && !GAME.paused ? (typeof VOL !== 'undefined' ? VOL.fx / 100 : 0.9) : 0, t, 0.05);
 }
 addEventListener('pointerdown', sfxInit, { capture: true }); addEventListener('keydown', sfxInit, { capture: true });
 document.addEventListener('visibilitychange', () => { if (!SFX.ctx) return; if (document.hidden) SFX.ctx.suspend(); else SFX.ctx.resume(); });
@@ -2344,11 +2344,23 @@ function musicSet(blob, name) {
   if (MUSIC.el.src) URL.revokeObjectURL(MUSIC.el.src);
   MUSIC.el.src = URL.createObjectURL(blob); MUSIC.has = true; MUSIC.name = name; musicLabel();
 }
-musicDB(st => { const g = st.get('cancion'); g.onsuccess = () => { if (g.result && g.result.blob) musicSet(g.result.blob, g.result.name); }; });
 const musPick = document.createElement('input'); musPick.type = 'file'; musPick.accept = 'audio/*,video/mp4,.mp3,.m4a,.mp4'; musPick.hidden = true; document.body.appendChild(musPick);
 const musBtn = document.createElement('button'); musBtn.className = 'mbtn'; musBtn.id = 'musBtn';
 const musOff = document.createElement('button'); musOff.className = 'mbtn'; musOff.id = 'musOff';
-$('camBtn').after(musBtn, musOff);
+// volumen de la música y de los efectos (se recuerdan en el móvil)
+const VOL = { music: 70, fx: 90 };
+try { const v = JSON.parse(localStorage.getItem('wake-vol') || '{}'); if (v.music != null) VOL.music = v.music; if (v.fx != null) VOL.fx = v.fx; } catch (e) {}
+{ const st = document.createElement('style'); st.textContent = `
+  .volrow { display: flex; align-items: center; gap: 10px; font-family: var(--stamp); font-size: 14px; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+  .volrow span { width: 118px; } .volrow input { flex: 1; max-width: 190px; accent-color: #ffc56b; }`; document.head.appendChild(st); }
+const volBox = document.createElement('div');
+volBox.innerHTML = `<label class="volrow"><span>Volumen música</span><input type="range" min="0" max="100" id="volMusic"></label>
+  <label class="volrow"><span>Volumen efectos</span><input type="range" min="0" max="100" id="volFx"></label>`;
+$('loadLine').after(volBox);
+$('volMusic').value = VOL.music; $('volFx').value = VOL.fx;
+const volSave = () => { try { localStorage.setItem('wake-vol', JSON.stringify(VOL)); } catch (e) {} };
+$('volMusic').oninput = e => { VOL.music = +e.target.value; volSave(); if (typeof ytUpdate === 'function') ytUpdate(); };
+$('volFx').oninput = e => { VOL.fx = +e.target.value; volSave(); sfxInit(); sfxUpdate(); };
 function musicLabel() {
   musBtn.textContent = MUSIC.has ? '🎵 ' + MUSIC.name.slice(0, 22) : '🎵 Elegir canción';
   musOff.textContent = 'Música: ' + (MUSIC.on ? 'sí' : 'no'); musOff.hidden = !MUSIC.has;
@@ -2384,22 +2396,23 @@ window.onYouTubeIframeAPIReady = () => {
     videoId: YTM.id, width: 200, height: 113,
     playerVars: { playsinline: 1, controls: 1, rel: 0, modestbranding: 1, loop: 1, playlist: YTM.id },
     events: {
-      onReady: () => { YTM.ready = true; YTM.player.setVolume(60); ytUpdate(); },
+      onReady: () => { YTM.ready = true; ytUpdate(); },
       onError: e => { YTM.err = e.data; console.warn('YouTube error', e.data); },
       onStateChange: e => { if (e.data === 0) { YTM.player.seekTo(0); YTM.player.playVideo(); } YTM.playing = e.data === 1; },
     },
   });
 };
 loadScript('https://www.youtube.com/iframe_api').catch(() => {});
-function ytWanted() { return YTM.on && !(MUSIC.has && MUSIC.on) && SFX.on && GAME.running && !GAME.paused && !document.hidden; }
+function ytWanted() { return VOL.music > 0 && SFX.on && GAME.running && !GAME.paused && !document.hidden; }
 function ytUpdate() {
   const want = ytWanted();
   if (!YTM.ready) return;
+  try { YTM.player.setVolume(VOL.music); } catch (e) {}
   try { if (want && !YTM.playing) YTM.player.playVideo(); else if (!want && YTM.playing) YTM.player.pauseVideo(); } catch (e) {}
 }
 const ytBtn = document.createElement('button'); ytBtn.className = 'mbtn'; ytBtn.id = 'ytBtn';
 const ytLabel = () => { ytBtn.textContent = '▶ YouTube: ' + (YTM.on ? 'Insane in the Brain' : 'no'); };
-ytLabel(); musBtn.before(ytBtn);
+
 ytBtn.onclick = () => { YTM.on = !YTM.on; try { localStorage.setItem('wake-yt', YTM.on ? 'on' : 'off'); } catch (e) {} ytLabel(); ytUpdate(); };
 document.addEventListener('visibilitychange', ytUpdate);
 $('camBtn').onclick = () => { setCam((CAM.mode + 1) % CAM.names.length); $('camBtn').textContent = 'Cámara: ' + CAM.names[CAM.mode].toLowerCase(); };
