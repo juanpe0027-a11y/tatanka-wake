@@ -1673,8 +1673,7 @@ function updateRider(dt, t) {
     }
     if (a.whirly) { a.flip = Math.min(TAU, a.flip + 6.5 * dt); if (a.flip >= TAU) a.flipping = false; if (ry < -0.4) { a.spin += 5 * fast * dt; } }
     // ---- grabs con L (y tweak: deslizar a otra dirección sin levantar el dedo). Teclado: Mayús+G y flechas
-    // el círculo izquierdo solo agarra si se pulsa YA en el aire (si no, el carve con el que entras a la estela haría un grab solo)
-    let g = (!IN.L.on || IN.L.t0 > a.t0 || IN.kb.KeyG) ? grabFor(S.L.x, S.L.y, a.toe !== R.sw) : null;
+        let g = IN.kb.KeyG ? grabFor(S.L.x, S.L.y, a.toe !== R.sw) : null;   // en el móvil el grab es solo con el botón GRAB (el círculo izquierdo es para dirigir)
     // solo si se pulsa YA en el aire (el dedo que estaba agachando para saltar no cuenta)
     const freshPress = IN.R.on ? IN.R.t0 > a.t0 : (IN.kb.Space && (IN.spaceT0 || 0) > a.t0);
     const centerHold = S.R.hold && freshPress && Math.abs(S.R.x) < 0.01 && Math.abs(S.R.y) < 0.01 && !NET.pushTarget;
