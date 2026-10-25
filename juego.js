@@ -830,6 +830,26 @@ const J = {}; for (const k of ['hB', 'hF', 'kB', 'kF', 'fB', 'fF', 'ch', 'hd', '
 // movimiento vivo del cuerpo: amortiguación de las piernas (muelle), tensión de la cuerda, giro y respiración
 const DYN = { t: 0, absorb: 0, absVel: 0, tension: 0, spin: 0, air: 0, prevSH: 0, prevVs: 0 };
 // sb: hacia qué lado de la tabla está la barca (+1 en regular, la punta; -1 en switch, la cola)
+// manos: a ratos (al azar) va con una sola mano y la otra abierta para equilibrarse; y algunas veces, al aterrizar
+// un giro, cae con la maneta por la espalda, la otra mano la coge por detrás y la vuelve a traer delante
+const HANDS = { one: 0, target: 0, side: 'F', next: 9, back: null };
+function updateHands(dt) {
+  const R = RIDER, H = HANDS;
+  const busy = R.state !== 'ride' || R.charging || R.grind || R.manualT || !GAME.running;
+  if (H.back) { H.back.t += dt; if (H.back.t > 2.5 || R.state !== 'ride') H.back = null; H.target = 0; }
+  else if (busy) H.target = 0;
+  else if ((H.next -= dt) <= 0) {
+    if (H.target) { H.target = 0; H.next = rnd(7, 16); }
+    else if (rnd() < 0.55) { H.target = 1; H.side = rnd() < 0.6 ? 'F' : 'B'; H.next = rnd(2.5, 5.5); }
+    else H.next = rnd(5, 10);
+  }
+  H.one = lerp(H.one, H.target, clamp(dt * 3, 0, 1));
+}
+function holdingHand() {   // qué mano lleva la maneta ahora: 'F', 'B' o null (las dos)
+  const H = HANDS;
+  if (H.back) { const t = H.back.t; return t < 1.1 ? H.back.hold : t < 2.15 ? (H.back.hold === 'F' ? 'B' : 'F') : null; }
+  return H.one > 0.5 ? H.side : null;
+}
 function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
   const D = DYN, ride = 1 - D.air;
   c = clamp(c + D.absorb, 0, 1);
@@ -858,10 +878,38 @@ function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
     const GP = { indy: [V3(0.02, 0.1, 0.22), 'B'], nose: [V3(0.6, 0.1, 0.0), 'F'], tail: [V3(-0.6, 0.12, 0.0), 'B'], stale: [V3(-0.05, 0.1, -0.22), 'B'] }[grab];
     if (GP) { const hand = GP[1] === 'F' ? J.aF : J.aB; hand.lerp(GP[0], grabK); if (GP[1] === 'F') J.aB.copy(J.handle); else J.aF.copy(J.handle); }
   }
+  if (handleOn && !(grab && grabK > 0) && D.air < 0.5) {
+    const H = HANDS, free = k => k === 'F' ? V3().copy(J.sF).add(V3(0.24 * sb, -0.24 + Math.sin(D.t * 1.3) * 0.03, 0.26))
+                                           : V3().copy(J.sB).add(V3(-0.34 * sb, -0.2 + Math.sin(D.t * 1.1) * 0.03, 0.1));
+    if (H.back) {
+      const t = H.back.t, A = H.back.hold, O = A === 'F' ? 'B' : 'F', aA = 'a' + A, aO = 'a' + O;
+      const back = V3(0.04 * sb, hy + 0.04, hz - 0.2), front = J.handle.clone();
+      const toFront = ss(clamp((t - 1.6) / 0.7, 0, 1));
+      J.handle.lerpVectors(back, front, toFront);
+      // A: la lleva por detrás hasta que la coge la otra; se abre y al final vuelve a la maneta
+      const relA = ss(clamp((t - 1.15) / 0.35, 0, 1)), backA = ss(clamp((t - 2.0) / 0.4, 0, 1));
+      J[aA].lerpVectors(J.handle, free(A), relA * (1 - backA));
+      if (t > 2.0) J[aA].lerpVectors(free(A), V3().copy(J.handle).add(V3(0, 0, A === 'F' ? -0.1 : 0.1)), backA);
+      // O: abierta para equilibrarse, va a buscarla por la espalda y se la trae delante
+      const grabO = ss(clamp((t - 0.85) / 0.35, 0, 1));
+      J[aO].lerpVectors(free(O), V3().copy(J.handle).add(V3(0, 0, t > 2.0 ? (O === 'F' ? -0.1 : 0.1) * backA : 0)), grabO);
+      // codos hacia fuera y hacia atrás cuando la mano va por la espalda
+      H.backElbow = 1 - toFront;
+    } else if (H.one > 0.01) {
+      const hold = 'a' + H.side, fr = H.side === 'F' ? 'B' : 'F';
+      J[hold].lerp(J.handle, H.one);
+      J['a' + fr].lerp(free(fr), H.one);
+      H.backElbow = 0;
+    } else H.backElbow = 0;
+  } else HANDS.backElbow = 0;
   if (!handleOn) { J.aF.copy(J.sF).add(V3(0.1, -0.45, 0.25)); J.aB.copy(J.sB).add(V3(-0.15, -0.4, 0.3)); }
   // codos: casi rectos cuando tira la cuerda, más doblados cuando está suelta o en los giros
   const bend = 0.04 - 0.03 * tens + 0.08 * D.spin;
   J.eF.lerpVectors(J.sF, J.aF, 0.5).add(V3(0, -bend, 0.05 + bend * 0.4)); J.eB.lerpVectors(J.sB, J.aB, 0.5).add(V3(0, -bend, 0.05 + bend * 0.4));
+  if (HANDS.backElbow > 0.01) {   // mano por detrás: el codo sale hacia fuera y atrás (si no, el brazo atraviesa el cuerpo)
+    const be = HANDS.backElbow;
+    for (const k of ['F', 'B']) { if (J['a' + k].z < hz - 0.08) J['e' + k].add(V3((k === 'F' ? 0.12 : -0.12) * sb * be, 0.02 * be, -0.06 * be)); }
+  }
 }
 
 // cuerda y maneta
@@ -1268,6 +1316,8 @@ function land() {
   else result = 'sketchy';
   setLandRing(0, false);
   if (result === 'fall') { fall(flipErr > 0.8 ? '¡DE CABEZA!' : '¡DE LADO!'); return; }
+  // algunas veces (no siempre), tras un giro limpio, cae con la maneta por la espalda y la cambia de mano
+  if (result === 'clean' && halfTurns !== 0 && rnd() < 0.35) { HANDS.back = { t: 0, hold: rnd() < 0.5 ? 'F' : 'B' }; HANDS.target = 0; HANDS.one = 0; }
   const deg = Math.abs(halfTurns) * 180;
   if (a.kind === 'hop' && !flips && !halfTurns && !a.grabFirst) { R.state = 'ride'; R.vy = 0; R.air = null; return; }   // un bote sin truco no puntúa
   const name = trickName(a, halfTurns, flips, deg);
@@ -1396,6 +1446,7 @@ function updateRider(dt, t) {
       }
     }
     R.charging = hold && R.state === 'ride';
+    updateHands(dt);
     R.crouch = lerp(R.crouch, 0.48 + R.ollieArm * 0.35 + (R.charging ? 0.12 : 0), clamp(dt * 6, 0, 1));
   } else if (R.state === 'air') {
     const a = R.air; a.t += dt;
@@ -1715,7 +1766,7 @@ function poseHuman(h, j) {
   hv.Y.subVectors(sh, hip).normalize();
   hv.Z.copy(j.fw).addScaledVector(hv.Y, -j.fw.dot(hv.Y)).normalize();
   hv.X.crossVectors(hv.Y, hv.Z).normalize();
-  const fLeft = hv.a.subVectors(j.hF, j.hB).dot(hv.X) >= 0, L = fLeft ? 'F' : 'B', R = fLeft ? 'B' : 'F';
+  const fLeft = hv.a.subVectors(j.hF, j.hB).dot(hv.X) >= 0, L = fLeft ? 'F' : 'B', R = fLeft ? 'B' : 'F'; h.LF = fLeft;
   hM.t.multiplyMatrices(hM.inv, b.Hips.parent.matrixWorld).invert();
   b.Hips.position.copy(hip).applyMatrix4(hM.t); b.Hips.updateMatrixWorld(true);
   relQuat(b.Hips, hq.r); hv.m.makeBasis(hv.X, hv.Y, hv.Z); hq.a.setFromRotationMatrix(hv.m); setBoneRelQuat(b.Hips, hq.a.multiply(hq.r));
@@ -1736,7 +1787,9 @@ function handWorld(out) {
   if (!SENEN || !SENEN.knuckL) return false;
   const a = RIDER.air, g = a && a.grab;
   const pl = SENEN.knuckL.getWorldPosition(tmp.n), pr = SENEN.knuckR.getWorldPosition(tmp.c);
+  const hh = RIDER.state === 'ride' ? holdingHand() : null;
   if (g && RIDER.state === 'air') { const frontGrabs = g === 'nose'; out.copy(frontGrabs ? pr : pl); }   // delante = mano izquierda
+  else if (hh) out.copy((hh === 'F') === !!SENEN.LF ? pl : pr);           // con una mano: la de la maneta
   else out.addVectors(pl, pr).multiplyScalar(0.5);
   return true;
 }
