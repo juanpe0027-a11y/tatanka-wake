@@ -911,8 +911,8 @@ function holdingHand() {   // qué mano lleva la maneta ahora: 'F', 'B' o null (
 // Indy: mano de atrás, canto de los dedos entre los pies · Mute: mano de delante, dedos · Melon: delante, talones
 // Stalefish: atrás, talones · Nose y Tail: las puntas
 const GRAB_POS = {
-  indy: [V3(0.02, 0.1, 0.22), 'B'], mute: [V3(0.1, 0.1, 0.22), 'F'], melon: [V3(0.06, 0.1, -0.22), 'F'], stale: [V3(-0.05, 0.1, -0.22), 'B'],
-  nose: [V3(0.6, 0.1, 0.0), 'F'], tail: [V3(-0.6, 0.12, 0.0), 'B'],
+  indy: [V3(0.02, 0.13, 0.21), 'B'], mute: [V3(0.1, 0.13, 0.21), 'F'], melon: [V3(0.06, 0.13, -0.21), 'F'], stale: [V3(-0.05, 0.13, -0.21), 'B'],
+  nose: [V3(0.55, 0.14, 0.0), 'F'], tail: [V3(-0.55, 0.15, 0.0), 'B'],
 };
 function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
   const D = DYN, ride = 1 - D.air;
@@ -930,6 +930,14 @@ function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
   const tw = 0.85;                                   // hombros bien abiertos hacia la barca: los dos brazos a la vista
   const fwd = lerp(0.04, 0.3, c) + Math.max(0, lean) * 0.12;
   J.ch.set((-0.16 - 0.06 * (1 - c) - 0.14 * tens) * sb, hy + lerp(0.45, 0.36, c) + breathe, hz + fwd);
+  // grab: el pecho baja hacia la tabla y las rodillas suben (si no, la mano no llega y se queda en la rodilla)
+  const GPi = grab && grabK > 0 ? GRAB_POS[grab] : null;
+  if (GPi) {
+    const sd = Math.sign(GPi[0].z), k = grabK;
+    J.ch.y -= 0.3 * k; J.ch.z += 0.14 * sd * k; J.ch.x += GPi[0].x * 0.3 * k;
+    J.hF.y -= 0.1 * k; J.hB.y -= 0.1 * k;
+    J.kF.y += 0.12 * k; J.kB.y += 0.12 * k; J.kF.z += 0.08 * k; J.kB.z += 0.08 * k;
+  }
   J.fw.set(Math.sin(tw) * sb, 0, Math.cos(tw)).normalize();
   const sl = V3(Math.cos(tw), 0, -Math.sin(tw) * sb).multiplyScalar(0.19);
   J.sF.copy(J.ch).add(sl).add(V3(0, 0.04, 0)); J.sB.copy(J.ch).sub(sl).add(V3(0, 0.04, 0));
