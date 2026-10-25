@@ -914,6 +914,9 @@ const GRAB_POS = {
   indy: [V3(0.02, 0.13, 0.21), 'B'], mute: [V3(0.1, 0.13, 0.21), 'F'], melon: [V3(0.06, 0.13, -0.21), 'F'], stale: [V3(-0.05, 0.13, -0.21), 'B'],
   nose: [V3(0.55, 0.14, 0.0), 'F'], tail: [V3(-0.55, 0.15, 0.0), 'B'],
 };
+// tabla tirada en el grab: se sube hacia la mano y se tuerce (punta arriba y de canto), aparte del cuerpo
+const BOARD_TW = { on: false, q: new T.Quaternion(), off: V3() };
+const twv = v => v.applyQuaternion(BOARD_TW.q).add(BOARD_TW.off);
 function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
   const D = DYN, ride = 1 - D.air;
   c = clamp(c + D.absorb, 0, 1);
@@ -924,19 +927,25 @@ function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
   J.toeF.set(0.3, 0.09, 0.16); J.toeB.set(-0.24, 0.09, 0.16);
   const kz = 0.1 + 0.25 * c + Math.max(0, lean) * 0.1, ky = lerp(0.5, 0.42, c);
   J.kF.set(0.29, ky, kz + chop); J.kB.set(-0.25, ky, kz - chop);
+  if (BOARD_TW.on) {   // pies con la tabla; rodillas arriba y abiertas (la pierna que se queda lejos sale estirada)
+    for (const v of [J.fF, J.fB, J.toeF, J.toeB]) twv(v);
+    const L = BOARD_TW.off.y;
+    J.kF.set(J.fF.x * 0.85 + 0.04, J.fF.y + 0.34 - L * 0.35, J.fF.z + 0.2 + L * 0.25);
+    J.kB.set(J.fB.x * 0.85 - 0.02, J.fB.y + 0.32 - L * 0.3, J.fB.z + 0.22 + L * 0.3);
+  }
   // cadera algo atrasada respecto a la barca (+X): el rider se cuelga de la cuerda
   const hipBack = (0.07 + 0.08 * tens) * sb;
   J.hF.set(-hipBack + 0.11, hy, hz); J.hB.set(-hipBack - 0.11, hy, hz);
-  const tw = 0.85;                                   // hombros bien abiertos hacia la barca: los dos brazos a la vista
+  // hombros abiertos hacia la barca al remolcar (los dos brazos a la vista); en el aire y en el grab, de lado, de cara a la ola
+  const tw = lerp(0.85, 0.18, D.air * (grab && grabK > 0 ? 1 : 0.55));
   const fwd = lerp(0.04, 0.3, c) + Math.max(0, lean) * 0.12;
   J.ch.set((-0.16 - 0.06 * (1 - c) - 0.14 * tens) * sb, hy + lerp(0.45, 0.36, c) + breathe, hz + fwd);
   // grab: el pecho baja hacia la tabla y las rodillas suben (si no, la mano no llega y se queda en la rodilla)
   const GPi = grab && grabK > 0 ? GRAB_POS[grab] : null;
   if (GPi) {
     const sd = Math.sign(GPi[0].z), k = grabK;
-    J.ch.y -= 0.3 * k; J.ch.z += 0.14 * sd * k; J.ch.x += GPi[0].x * 0.3 * k;
-    J.hF.y -= 0.1 * k; J.hB.y -= 0.1 * k;
-    J.kF.y += 0.12 * k; J.kB.y += 0.12 * k; J.kF.z += 0.08 * k; J.kB.z += 0.08 * k;
+    J.ch.y -= 0.12 * k; J.ch.z += 0.1 * sd * k; J.ch.x += GPi[0].x * 0.2 * k;
+    J.hF.y -= 0.04 * k; J.hB.y -= 0.04 * k;
   }
   J.fw.set(Math.sin(tw) * sb, 0, Math.cos(tw)).normalize();
   const sl = V3(Math.cos(tw), 0, -Math.sin(tw) * sb).multiplyScalar(0.19);
@@ -948,7 +957,12 @@ function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
   J.aF.copy(J.handle).add(V3(0, 0, -0.1)); J.aB.copy(J.handle).add(V3(0, 0, 0.1));
   if (grab && grabK > 0) {
     const GP = GRAB_POS[grab];
-    if (GP) { const hand = GP[1] === 'F' ? J.aF : J.aB; hand.lerp(GP[0], grabK); if (GP[1] === 'F') J.aB.copy(J.handle); else J.aF.copy(J.handle); }
+    if (GP) {
+      const hand = GP[1] === 'F' ? J.aF : J.aB, tgt = GP[0].clone(); if (BOARD_TW.on) twv(tgt);
+      hand.lerp(tgt, grabK);
+      J.handle.lerp(V3(0.68 * sb, J.ch.y - 0.04, J.ch.z + 0.05), grabK);   // brazo de la cuerda estirado, a la altura del hombro
+      if (GP[1] === 'F') J.aB.copy(J.handle); else J.aF.copy(J.handle);
+    }
   }
   if (handleOn && !(grab && grabK > 0) && D.air < 0.5) {
     // brazo libre: estirado y hacia atrás, lejos de la barca (como en el vídeo), con un leve balanceo
@@ -1706,10 +1720,13 @@ function updateRider(dt, t) {
     riderRoot.quaternion.copy(a.baseQ).multiply(tmp.q).multiply(tmp.q2);
     if (a.raley > 0) riderRoot.rotateX(-1.35 * ss(a.raley));    // raley: el cuerpo estirado y la tabla por encima
     // grab con estilo: la tabla tirada hacia un lado (como en las fotos) y más cuanto más se aguanta
-    const ST = { indy: [0.38, 0.08], mute: [0.32, 0.2], melon: [-0.38, 0.12], stale: [-0.36, -0.06], nose: [0.05, 0.42], tail: [0.05, -0.45], method: [-0.7, 0.4], japan: [0.55, 0.35], fashion: [-0.4, -0.3] }[a.grab] || [0, 0];
+    const ST = { indy: [0.35, -0.45], mute: [0.3, 0.45], melon: [-0.4, 0.42], stale: [-0.35, -0.45], nose: [0.1, 0.6], tail: [0.1, -0.6], method: [-0.75, 0.55], japan: [0.6, 0.5], fashion: [-0.4, -0.5] }[a.grab] || [0, 0];   // [de canto, punta arriba/abajo]: con la punta inclinada una pierna sale estirada y la otra recogida
     const kk = a.grab ? (a.tweak ? 1.35 : 1) : 0;
     a.styX = lerp(a.styX || 0, ST[0] * kk, clamp(dt * 7, 0, 1)); a.styZ = lerp(a.styZ || 0, ST[1] * kk, clamp(dt * 7, 0, 1));
-    if (Math.abs(a.styX) + Math.abs(a.styZ) > 0.002) { riderRoot.rotateX(a.styX * (R.sw ? -1 : 1)); riderRoot.rotateZ(a.styZ); }
+    const LIFT = { indy: 0.18, mute: 0.18, melon: 0.16, stale: 0.16, nose: 0.12, tail: 0.12, method: 0.22, japan: 0.2, fashion: 0.16 }[a.grab] || 0;
+    a.styL = lerp(a.styL || 0, LIFT * kk, clamp(dt * 7, 0, 1));
+    BOARD_TW.on = Math.abs(a.styX) + Math.abs(a.styZ) + a.styL > 0.003;
+    BOARD_TW.q.setFromEuler(new T.Euler(a.styX * 1.25 * (R.sw ? -1 : 1), 0, a.styZ)); BOARD_TW.off.set(0, a.styL, 0);
   } else if (R.state === 'fallen') {
     riderRoot.rotation.set(0, R.yaw, 0); riderRoot.rotateX(-1.25); riderRoot.rotateY(R.fallT * R.fallSpin * Math.max(0, 1 - R.fallT));
   } else {
@@ -1751,6 +1768,8 @@ function updateRider(dt, t) {
   const gp = a && a.grab ? ({ japan: 'mute', method: 'melon', fashion: 'stale' }[a.grab] || a.grab) : null;
   computePose(R.crouch, R.state === 'air' ? 0 : R.lean, gp, gp ? 1 : 0, R.state !== 'fallen', a ? a.raley : 0, R.sw ? -1 : 1);
   poseBody(J);
+  boardGroup.quaternion.copy(BOARD_TW.on ? BOARD_TW.q : tmp.qI || (tmp.qI = new T.Quaternion())); boardGroup.position.copy(BOARD_TW.on ? BOARD_TW.off : V3());
+  BOARD_TW.on = false;   // (los demás riders se colocan sin esto)
   // --- cuerda: del punto de remolque de la torre a la maneta (que está en las manos de verdad)
   riderRoot.updateMatrixWorld(true);
   const hw = tmp.a;
