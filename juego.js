@@ -1673,7 +1673,8 @@ function updateRider(dt, t) {
     }
     if (a.whirly) { a.flip = Math.min(TAU, a.flip + 6.5 * dt); if (a.flip >= TAU) a.flipping = false; if (ry < -0.4) { a.spin += 5 * fast * dt; } }
     // ---- grabs con L (y tweak: deslizar a otra dirección sin levantar el dedo). Teclado: Mayús+G y flechas
-    let g = grabFor(S.L.x, S.L.y, a.toe !== R.sw);
+    // el círculo izquierdo solo agarra si se pulsa YA en el aire (si no, el carve con el que entras a la estela haría un grab solo)
+    let g = (!IN.L.on || IN.L.t0 > a.t0 || IN.kb.KeyG) ? grabFor(S.L.x, S.L.y, a.toe !== R.sw) : null;
     // solo si se pulsa YA en el aire (el dedo que estaba agachando para saltar no cuenta)
     const freshPress = IN.R.on ? IN.R.t0 > a.t0 : (IN.kb.Space && (IN.spaceT0 || 0) > a.t0);
     const centerHold = S.R.hold && freshPress && Math.abs(S.R.x) < 0.01 && Math.abs(S.R.y) < 0.01 && !NET.pushTarget;
@@ -2243,13 +2244,14 @@ function recShow() {
 $('place').textContent = 'TATANKA · PUERTO DE SAGUNTO';
 const voiceEl = document.createElement('audio'); voiceEl.setAttribute('playsinline', ''); document.body.appendChild(voiceEl);
 const micBtn = document.createElement('button'); micBtn.id = 'bMic'; micBtn.textContent = '🎤'; micBtn.setAttribute('aria-label', 'Mantén pulsado para grabar una nota de voz');
-$('bCam').after(micBtn);
+$('hud').appendChild(micBtn);   // a la derecha, a media altura (encima del círculo de los giros)
 // botón del sonido (se recuerda en el móvil)
 const sndBtn = document.createElement('button'); sndBtn.id = 'bSnd'; sndBtn.setAttribute('aria-label', 'Sonido');
 const sndIcon = () => { sndBtn.textContent = SFX.on ? '🔊' : '🔇'; };
-sndIcon(); micBtn.after(sndBtn);
+sndIcon(); $('bCam').after(sndBtn);
 sndBtn.addEventListener('click', e => { e.stopPropagation(); SFX.on = !SFX.on; sndIcon(); try { localStorage.setItem('wake-sound', SFX.on ? 'on' : 'off'); } catch (er) {} sfxInit(); if (typeof musicUpdate === 'function') musicUpdate(); });
 { const st = document.createElement('style'); st.textContent = `
+  #bMic { position: absolute; right: max(16px, env(safe-area-inset-right)); top: 46%; transform: translateY(-50%); width: 46px; height: 46px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.85); background: rgba(0,0,0,.18); color: #fff; font-size: 20px; pointer-events: auto; cursor: pointer; }
   #bMic.rec { background: #ff5a4e !important; border-color: #fff !important; animation: micpulse .45s ease-in-out infinite alternate; }
   @keyframes micpulse { from { transform: scale(1); } to { transform: scale(1.15); } }
   #voiceLog { position: absolute; left: 50%; top: 92px; transform: translateX(-50%); font: 700 13px system-ui, sans-serif; text-shadow: 0 1px 4px rgba(0,0,0,.8); pointer-events: none; text-align: center; }
