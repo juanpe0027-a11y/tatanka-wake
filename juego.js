@@ -333,6 +333,8 @@ const SHORE_Z = 80;
 // Distribución real (Google Earth): Puerto Siles en x ≈ -200, espigón curvo en x ≈ 300, Pantalán en x = 900
 // y el puerto industrial de Sagunto al otro lado del Pantalán.
 const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
+// entre el club náutico y el espigón no hay fincas: es un paraje natural con matorral, pinos, palmeras y un camino de grava
+const WILD0 = MARINA_X + 12, WILD1 = GROIN_X + 15, inWild = x => x > WILD0 && x < WILD1;
 {
   // ---- tierra, playa y paseo
   const sand = MAT(0xd9c29a, 0.95), sandWet = MAT(0xb8a07a, 0.9), prom = MAT(0xcfc4b2, 0.9), asphalt = MAT(0x4a4a4c, 0.9), land = MAT(0x9c946f, 1);
@@ -425,7 +427,7 @@ const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
   for (let row = 0; row < 3; row++) {
     let x = -1300 + rnd(0, 20);
     while (x < PIER_X - 60) {
-      if (row < 2 && x > GROIN_X - 130 && x < GROIN_X + 90) { x += 30; continue; }   // la zona verde del espigón
+      if (inWild(x) || inWild(x + 25)) { x += 30; continue; }   // el paraje natural
       const tower = rnd() < (row === 0 ? 0.16 : 0.08);
       const kind = tower ? 'torre' : kinds[Math.floor(rnd(0, kinds.length))];
       const w = tower ? rnd(20, 28) : rnd(16, 30), d = rnd(14, 20);
@@ -441,6 +443,59 @@ const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
       x += w + (row === 0 ? rnd(2, 9) : rnd(4, 14));
     }
   }
+  // ---- el paraje natural entre Puerto Siles y el espigón (Google Earth): playa de grava, duna baja, matorral
+  //      verde oscuro, pinos, palmeras sueltas y un camino de tierra paralelo a la costa; las torres de Canet al fondo
+  {
+    const groundTex = canvasTex(512, 512, (c, w, h) => {
+      c.fillStyle = '#a8946c'; c.fillRect(0, 0, w, h);
+      for (let i = 0; i < 2600; i++) {
+        const g = Math.random();
+        c.fillStyle = g < 0.55 ? `rgba(${70 + Math.random() * 30 | 0},${100 + Math.random() * 30 | 0},${60 + Math.random() * 20 | 0},.55)` : `rgba(${150 + Math.random() * 40 | 0},${130 + Math.random() * 30 | 0},${95 + Math.random() * 20 | 0},.5)`;
+        c.beginPath(); c.arc(Math.random() * w, Math.random() * h, 3 + Math.random() * 12, 0, TAU); c.fill();
+      }
+    }, { repeat: true });
+    groundTex.repeat.set(10, 10);
+    const W = WILD1 - WILD0, Z0 = SHORE_Z + 28, Z1 = SHORE_Z + 520;
+    box(W, 1.5, Z1 - Z0, MAT(0xffffff, 1, 0, { map: groundTex }), (WILD0 + WILD1) / 2, 0.32, (Z0 + Z1) / 2, world, false);   // tapa el paseo y la avenida
+    // duna baja detrás de la playa de grava
+    box(W, 1.2, 9, MAT(0xcdb894, 1), (WILD0 + WILD1) / 2, 0.55, Z0 + 3, world, false);   // duna baja
+    box(W, 1.0, 10, MAT(0xbfb4a2, 1), (WILD0 + WILD1) / 2, -0.4, SHORE_Z + 6, world, false);   // grava de la orilla
+    // camino de tierra/grava paralelo a la costa y dos ramales hacia dentro
+    const pathM = MAT(0xd8c9a6, 1);
+    box(W, 0.2, 5, pathM, (WILD0 + WILD1) / 2, 1.15, SHORE_Z + 58, world, false);
+    for (const px of [WILD0 + 150, WILD0 + 340]) { const b = box(4, 0.2, 160, pathM, px, 1.16, SHORE_Z + 140, world, false); b.rotation.y = 0.35; }
+    // matorral: lentiscos y coscojas en manchas (verde oscuro, algo azulado como en la foto)
+    const nb = 2600, bushes = new T.InstancedMesh(new T.DodecahedronGeometry(1, 1), MAT(0xffffff, 1), nb), o = new T.Object3D(), col = new T.Color();
+    const greens = [0x3f5f3c, 0x4c6b45, 0x35553f, 0x5a7650, 0x46644c];
+    for (let i = 0; i < nb; i++) {
+      // en manchas: cerca de unos centros al azar
+      const cx = WILD0 + 10 + ((i * 7919) % 97) / 97 * (W - 20), cz = SHORE_Z + 40 + ((i * 104729) % 89) / 89 * 440;
+      let x = cx + rnd(-14, 14), z = cz + rnd(-12, 12);
+      if (i % 3 === 0) { x = rnd(WILD0 + 4, WILD1 - 4); z = SHORE_Z + rnd(34, 54); }   // franja tupida justo detrás de la playa (lo que se ve desde el mar)
+      if (Math.abs(z - (SHORE_Z + 58)) < 4) continue;   // el camino libre
+      const sc = rnd(1.1, 3.4);
+      o.position.set(x, 1.0 + sc * 0.4, z); o.rotation.set(rnd(0, 3), rnd(0, 6), rnd(0, 3)); o.scale.set(sc * rnd(1, 1.6), sc * rnd(0.6, 1.0), sc * rnd(1, 1.6)); o.updateMatrix();
+      bushes.setMatrixAt(i, o.matrix); bushes.setColorAt(i, col.set(greens[i % greens.length]).multiplyScalar(rnd(0.85, 1.15)));
+    }
+    bushes.castShadow = true; bushes.receiveShadow = true; world.add(bushes);
+    // pinos piñoneros (copa ancha y plana) y algún pino más alto
+    const np = 70, ptr = new T.InstancedMesh(new T.CylinderGeometry(0.25, 0.4, 1, 7), MAT(0x6b5641, 0.95), np), pcr = new T.InstancedMesh(new T.SphereGeometry(1, 12, 8), MAT(0x3d5a36, 1), np);
+    for (let i = 0; i < np; i++) {
+      const x = rnd(WILD0 + 15, WILD1 - 15), z = SHORE_Z + rnd(80, 480), h = rnd(6, 11);
+      o.position.set(x, 1 + h / 2, z); o.rotation.set(rnd(-0.1, 0.1), 0, rnd(-0.1, 0.1)); o.scale.set(1, h, 1); o.updateMatrix(); ptr.setMatrixAt(i, o.matrix);
+      const r = rnd(3.5, 6); o.position.set(x, 1 + h + 0.8, z); o.rotation.set(0, rnd(0, 6), 0); o.scale.set(r, r * 0.38, r * rnd(0.8, 1.1)); o.updateMatrix(); pcr.setMatrixAt(i, o.matrix);
+    }
+    ptr.castShadow = pcr.castShadow = true; world.add(ptr, pcr);
+    // al fondo, las torres de cristal de Canet
+    const glassT = canvasTex(256, 512, (c, w, h) => {
+      c.fillStyle = '#8fa6b8'; c.fillRect(0, 0, w, h);
+      for (let y = 0; y < h; y += 16) { c.fillStyle = 'rgba(255,255,255,.35)'; c.fillRect(0, y, w, 3); c.fillStyle = 'rgba(40,60,80,.25)'; c.fillRect(0, y + 3, w, 10); }
+      for (let x = 0; x < w; x += 32) { c.fillStyle = 'rgba(230,240,245,.5)'; c.fillRect(x, 0, 2, h); }
+    }, { repeat: true });
+    for (const [tx, tz, tw, th] of [[MARINA_X + 60, SHORE_Z + 640, 44, 62], [MARINA_X + 105, SHORE_Z + 660, 30, 48]]) {
+      const tb = new T.Mesh(boxUV(tw, th, 22, tw / 20, th / 30), MAT(0xffffff, 0.25, 0.3, { map: glassT })); tb.position.set(tx, th / 2, tz); world.add(tb);
+    }
+  }
   // ---- coches aparcados a los dos lados de la avenida
   {
     const n = 220, bodyG = new T.BoxGeometry(4.2, 0.85, 1.8), cabG = new T.BoxGeometry(2.3, 0.6, 1.62);
@@ -448,7 +503,7 @@ const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
     const cols = [0xf2f2f0, 0x1c1d20, 0x8c9196, 0xb32a2a, 0x2a4f8c, 0xd8d3c8, 0x4a5a3a].map(c => new T.Color(c));
     for (let i = 0; i < n; i++) {
       const side = i % 2, xx = -1250 + (i >> 1) * 19 + rnd(-3, 3), zz = SHORE_Z + (side ? 95.2 : 85.2);
-      o.scale.setScalar(xx > GROIN_X - 120 && xx < GROIN_X + 80 ? 0 : 1);
+      o.scale.setScalar(inWild(xx) ? 0 : 1);
       o.position.set(xx, 1.25, zz); o.rotation.set(0, rnd(-0.03, 0.03), 0); o.updateMatrix(); bodies.setMatrixAt(i, o.matrix); bodies.setColorAt(i, cols[Math.floor(rnd(0, cols.length))]);
       o.position.y = 1.95; o.position.x -= 0.2; o.updateMatrix(); cabs.setMatrixAt(i, o.matrix);
     }
@@ -468,11 +523,12 @@ const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
     const trunkG = new T.CylinderGeometry(0.32, 0.45, 1, 9); trunkG.translate(0, 0.5, 0);
     const frondG = new T.PlaneGeometry(1.4, 5.2, 1, 6); frondG.translate(0, 2.6, 0);
     { const p = frondG.attributes.position; for (let i = 0; i < p.count; i++) { const y = p.getY(i); p.setZ(i, -0.075 * y * y); } }
-    const n = 120, trunks = new T.InstancedMesh(trunkG, MAT(0x7d6a52, 0.95), n);
+    const n = 150, trunks = new T.InstancedMesh(trunkG, MAT(0x7d6a52, 0.95), n);
     const fronds = new T.InstancedMesh(frondG, MAT(0xffffff, 0.75, 0, { map: frondTex, alphaTest: 0.4, side: T.DoubleSide }), n * 16);
     const o = new T.Object3D();
     for (let i = 0; i < n; i++) {
-      const x = PIER_X - 40 - i * 20 + rnd(-3, 3), z = SHORE_Z + 70 + (i % 2) * 10, wash = rnd() < 0.3;
+      let x = PIER_X - 40 - i * 20 + rnd(-3, 3), z = SHORE_Z + 70 + (i % 2) * 10, wash = rnd() < 0.3;
+      if (i >= 120 || inWild(x)) { x = rnd(WILD0 + 10, WILD1 - 10); z = SHORE_Z + rnd(45, 260); wash = rnd() < 0.6; }   // sueltas por el paraje
       const h = wash ? rnd(11, 15) : rnd(5, 8.5), thick = wash ? 0.55 : 1.15;
       o.position.set(x, 0.8, z); o.rotation.set(rnd(-0.05, 0.05), 0, rnd(-0.05, 0.05)); o.scale.set(thick, h, thick); o.updateMatrix(); trunks.setMatrixAt(i, o.matrix);
       const nf = 16, sc = wash ? 0.6 : 1.05;
@@ -485,6 +541,7 @@ const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
     // farolas del paseo
     const poleM = MAT(0x3b3f44, 0.5, 0.6);
     for (let x = PIER_X - 50; x > -1280; x -= 26) {
+      if (inWild(x)) continue;
       rod(V3(x, 0.8, SHORE_Z + 80), V3(x, 8.5, SHORE_Z + 80), 0.09, poleM, world);
       box(1.6, 0.14, 0.32, poleM, x - 0.7, 8.5, SHORE_Z + 80, world, false);
     }
