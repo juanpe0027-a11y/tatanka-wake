@@ -2181,7 +2181,7 @@ $('bCam').after(micBtn);
 const sndBtn = document.createElement('button'); sndBtn.id = 'bSnd'; sndBtn.setAttribute('aria-label', 'Sonido');
 const sndIcon = () => { sndBtn.textContent = SFX.on ? '🔊' : '🔇'; };
 sndIcon(); micBtn.after(sndBtn);
-sndBtn.addEventListener('click', e => { e.stopPropagation(); SFX.on = !SFX.on; sndIcon(); try { localStorage.setItem('wake-sound', SFX.on ? 'on' : 'off'); } catch (er) {} sfxInit(); });
+sndBtn.addEventListener('click', e => { e.stopPropagation(); SFX.on = !SFX.on; sndIcon(); try { localStorage.setItem('wake-sound', SFX.on ? 'on' : 'off'); } catch (er) {} sfxInit(); if (typeof musicUpdate === 'function') musicUpdate(); });
 { const st = document.createElement('style'); st.textContent = `
   #bMic.rec { background: #ff5a4e !important; border-color: #fff !important; animation: micpulse .45s ease-in-out infinite alternate; }
   @keyframes micpulse { from { transform: scale(1); } to { transform: scale(1.15); } }
@@ -2279,7 +2279,7 @@ function updatePeers(dt) {
 //  BUCLE
 // =====================================================================================
 const GAME = { running: false, paused: false, t: 0 };
-function togglePause() { if (!GAME.running) return; GAME.paused = !GAME.paused; msg(GAME.paused ? 'PAUSA' : ''); sfxUpdate(); }
+function togglePause() { if (!GAME.running) return; GAME.paused = !GAME.paused; msg(GAME.paused ? 'PAUSA' : ''); sfxUpdate(); musicUpdate(); }
 $('bPause').onclick = togglePause; $('bCam').onclick = nextCam;
 // Omar y su tabla (si el móvil tiene guardado un index.html viejo sin ellos, se añaden aquí)
 if (!document.querySelector('#riders .opt[data-r="omar"]')) {
@@ -2328,6 +2328,47 @@ document.querySelectorAll('#patrons .opt').forEach(b => b.onclick = () => {
 function showPanel(id) { for (const p of ['pMain', 'pChars', 'pControls', 'pStats', 'pResult']) if ($(p)) $(p).hidden = p !== id; }
 $('toChars').onclick = () => showPanel('pChars'); $('charsOk').onclick = () => showPanel('pMain');
 $('toControls').onclick = () => showPanel('pControls'); $('controlsOk').onclick = () => showPanel('pMain');
+// ---- MÚSICA: cada uno elige su canción del móvil. No se sube a internet: se guarda solo en ese móvil
+//      (IndexedDB) y suena durante la sesión, junto con los efectos del agua y del motor
+const MUSIC = { el: document.createElement('audio'), on: true, has: false, name: '' };
+MUSIC.el.loop = true; MUSIC.el.setAttribute('playsinline', ''); MUSIC.el.volume = 0.55; document.body.appendChild(MUSIC.el);
+try { MUSIC.on = localStorage.getItem('wake-music') !== 'off'; } catch (e) {}
+function musicDB(fn) {
+  try {
+    const rq = indexedDB.open('wake', 1);
+    rq.onupgradeneeded = () => rq.result.createObjectStore('musica');
+    rq.onsuccess = () => { try { fn(rq.result.transaction('musica', 'readwrite').objectStore('musica')); } catch (e) {} };
+  } catch (e) {}
+}
+function musicSet(blob, name) {
+  if (MUSIC.el.src) URL.revokeObjectURL(MUSIC.el.src);
+  MUSIC.el.src = URL.createObjectURL(blob); MUSIC.has = true; MUSIC.name = name; musicLabel();
+}
+musicDB(st => { const g = st.get('cancion'); g.onsuccess = () => { if (g.result && g.result.blob) musicSet(g.result.blob, g.result.name); }; });
+const musPick = document.createElement('input'); musPick.type = 'file'; musPick.accept = 'audio/*,video/mp4,.mp3,.m4a,.mp4'; musPick.hidden = true; document.body.appendChild(musPick);
+const musBtn = document.createElement('button'); musBtn.className = 'mbtn'; musBtn.id = 'musBtn';
+const musOff = document.createElement('button'); musOff.className = 'mbtn'; musOff.id = 'musOff';
+$('camBtn').after(musBtn, musOff);
+function musicLabel() {
+  musBtn.textContent = MUSIC.has ? '🎵 ' + MUSIC.name.slice(0, 22) : '🎵 Elegir canción';
+  musOff.textContent = 'Música: ' + (MUSIC.on ? 'sí' : 'no'); musOff.hidden = !MUSIC.has;
+}
+musicLabel();
+musBtn.onclick = () => musPick.click();
+musPick.onchange = () => {
+  const f = musPick.files && musPick.files[0]; if (!f) return;
+  const name = f.name.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').replace(/\b(official|hd|video|audio|lyrics)\b/gi, '').replace(/\s+/g, ' ').trim() || 'Mi canción';
+  musicSet(f, name);
+  musicDB(st => st.put({ blob: f, name }, 'cancion'));
+  musPick.value = '';
+};
+musOff.onclick = () => { MUSIC.on = !MUSIC.on; try { localStorage.setItem('wake-music', MUSIC.on ? 'on' : 'off'); } catch (e) {} musicLabel(); musicUpdate(); };
+function musicUpdate() {   // suena mientras navegas (no en pausa, ni en el menú, ni con el sonido quitado)
+  const want = MUSIC.has && MUSIC.on && SFX.on && GAME.running && !GAME.paused && !document.hidden;
+  if (want && MUSIC.el.paused) { const pr = MUSIC.el.play(); if (pr && pr.catch) pr.catch(() => {}); }
+  else if (!want && !MUSIC.el.paused) MUSIC.el.pause();
+}
+document.addEventListener('visibilitychange', musicUpdate);
 $('camBtn').onclick = () => { setCam((CAM.mode + 1) % CAM.names.length); $('camBtn').textContent = 'Cámara: ' + CAM.names[CAM.mode].toLowerCase(); };
 // en el móvil se pone en pantalla completa sola al primer toque (el navegador no deja hacerlo sin tocar)
 function autoFullscreen(e) {
@@ -2365,7 +2406,7 @@ function tickSession(dt) {
 function endSession() {
   const R = RIDER, prev = (REC.data && REC.data.best) || 0, sc = R.score;
   recSave();                                                       // se guarda con el juego aún en marcha
-  GAME.running = false; $('hud').hidden = true; $('menu').hidden = false; showPanel('pResult');
+  GAME.running = false; $('hud').hidden = true; $('menu').hidden = false; showPanel('pResult'); musicUpdate();
   const list = Object.entries(REC.all || {}).map(([k, v]) => ({ me: k === REC.dev, best: k === REC.dev ? Math.max(sc, prev) : ((v.st || {}).best || 0) })).sort((a, b) => b.best - a.best);
   const pos = list.findIndex(v => v.me) + 1, fmt = v => (v || 0).toLocaleString('es-ES');
   $('resBox').innerHTML = `<b>Puntos</b><span style="font:400 34px var(--display, sans-serif)">${fmt(sc)}</span>
@@ -2378,6 +2419,7 @@ function endSession() {
 $('again').onclick = () => $('go').onclick();
 $('resMenu').onclick = () => showPanel('pMain');
 $('go').onclick = () => {
+  setTimeout(musicUpdate, 50);
   pickLane(); startSession();
   $('menu').hidden = true; $('hud').hidden = false; GAME.running = true; getUp(); setCam(CAM.mode);
   if (IS_MOBILE) {
