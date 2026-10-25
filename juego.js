@@ -879,8 +879,9 @@ function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
     if (GP) { const hand = GP[1] === 'F' ? J.aF : J.aB; hand.lerp(GP[0], grabK); if (GP[1] === 'F') J.aB.copy(J.handle); else J.aF.copy(J.handle); }
   }
   if (handleOn && !(grab && grabK > 0) && D.air < 0.5) {
-    const H = HANDS, free = k => k === 'F' ? V3().copy(J.sF).add(V3(0.24 * sb, -0.24 + Math.sin(D.t * 1.3) * 0.03, 0.26))
-                                           : V3().copy(J.sB).add(V3(-0.34 * sb, -0.2 + Math.sin(D.t * 1.1) * 0.03, 0.1));
+    // brazo libre: estirado y hacia atrás, lejos de la barca (como en el vídeo), con un leve balanceo
+    const H = HANDS, free = k => k === 'F' ? V3().copy(J.sF).add(V3(0.12 * sb, -0.22 + Math.sin(D.t * 1.3) * 0.03, 0.42))
+                                           : V3().copy(J.sB).add(V3(-0.46 * sb, -0.24 + Math.sin(D.t * 1.1) * 0.04, 0.06));
     if (H.back) {
       const t = H.back.t, A = H.back.hold, O = A === 'F' ? 'B' : 'F', aA = 'a' + A, aO = 'a' + O;
       const back = V3(0.04 * sb, hy + 0.04, hz - 0.2), front = J.handle.clone();
@@ -897,6 +898,7 @@ function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
       H.backElbow = 1 - toFront;
     } else if (H.one > 0.01) {
       const hold = 'a' + H.side, fr = H.side === 'F' ? 'B' : 'F';
+      J.handle.lerp(V3(J.hF.x + 0.14 * sb, hy + 0.03, hz + 0.15), 0.45 * H.one);   // con una mano, la maneta pegada a la cadera de delante
       J[hold].lerp(J.handle, H.one);
       J['a' + fr].lerp(free(fr), H.one);
       H.backElbow = 0;
