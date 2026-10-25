@@ -907,6 +907,13 @@ function holdingHand() {   // qué mano lleva la maneta ahora: 'F', 'B' o null (
   if (H.back) { const t = H.back.t; return t < 1.1 ? H.back.hold : t < 2.15 ? (H.back.hold === 'F' ? 'B' : 'F') : null; }
   return H.one > 0.5 ? H.side : null;
 }
+// dónde va la mano en cada grab (en la tabla: +x punta, +z canto de los dedos, y arriba) y con qué mano (F delante, B detrás)
+// Indy: mano de atrás, canto de los dedos entre los pies · Mute: mano de delante, dedos · Melon: delante, talones
+// Stalefish: atrás, talones · Nose y Tail: las puntas
+const GRAB_POS = {
+  indy: [V3(0.02, 0.1, 0.22), 'B'], mute: [V3(0.1, 0.1, 0.22), 'F'], melon: [V3(0.06, 0.1, -0.22), 'F'], stale: [V3(-0.05, 0.1, -0.22), 'B'],
+  nose: [V3(0.6, 0.1, 0.0), 'F'], tail: [V3(-0.6, 0.12, 0.0), 'B'],
+};
 function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
   const D = DYN, ride = 1 - D.air;
   c = clamp(c + D.absorb, 0, 1);
@@ -932,7 +939,7 @@ function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
   J.handle.set(pull * sb, hy - 0.05 + 0.1 * D.spin, hz + 0.22 + fwd * 0.4 - 0.08 * D.spin);
   J.aF.copy(J.handle).add(V3(0, 0, -0.1)); J.aB.copy(J.handle).add(V3(0, 0, 0.1));
   if (grab && grabK > 0) {
-    const GP = { indy: [V3(0.02, 0.1, 0.22), 'B'], nose: [V3(0.6, 0.1, 0.0), 'F'], tail: [V3(-0.6, 0.12, 0.0), 'B'], stale: [V3(-0.05, 0.1, -0.22), 'B'] }[grab];
+    const GP = GRAB_POS[grab];
     if (GP) { const hand = GP[1] === 'F' ? J.aF : J.aB; hand.lerp(GP[0], grabK); if (GP[1] === 'F') J.aB.copy(J.handle); else J.aF.copy(J.handle); }
   }
   if (handleOn && !(grab && grabK > 0) && D.air < 0.5) {
@@ -1385,8 +1392,10 @@ function grabFor(x, y, swap) {
   if (swap) g = { indy: 'stale', stale: 'indy', nose: 'tail', tail: 'nose' }[g];
   return g;
 }
-const GRAB_NAME = { indy: 'Indy', nose: 'Nose', tail: 'Tail', stale: 'Stalefish', japan: 'Japan Air', method: 'Method', fashion: 'Fashion Air' };
+const GRAB_NAME = { indy: 'Indy', mute: 'Mute', melon: 'Melon', nose: 'Nose', tail: 'Tail', stale: 'Stalefish', japan: 'Japan Air', method: 'Method', fashion: 'Fashion Air' };
 const OTHER_NAME = { indy: 'Canadian Bacon', nose: 'Crail', tail: 'Seatbelt', stale: 'Roast Beef' };
+// el botón GRAB (el de OLLIE en el aire) elige uno de estos cada salto, al azar
+const BTN_GRABS = ['indy', 'mute', 'melon', 'stale', 'nose', 'tail', 'method', 'japan', 'indy', 'method'];
 function grabLabel(a) {
   const g = a.grabFirst; if (!g) return '';
   let n = a.other && OTHER_NAME[g] ? OTHER_NAME[g] : GRAB_NAME[g];
@@ -1642,6 +1651,11 @@ function updateRider(dt, t) {
     if (a.whirly) { a.flip = Math.min(TAU, a.flip + 6.5 * dt); if (a.flip >= TAU) a.flipping = false; if (ry < -0.4) { a.spin += 5 * fast * dt; } }
     // ---- grabs con L (y tweak: deslizar a otra dirección sin levantar el dedo). Teclado: Mayús+G y flechas
     let g = grabFor(S.L.x, S.L.y, a.toe !== R.sw);
+    const centerHold = S.R.hold && Math.abs(S.R.x) < 0.01 && Math.abs(S.R.y) < 0.01 && !NET.pushTarget;
+    if (!g && centerHold) {
+      if (!a.btnGrab) a.btnGrab = BTN_GRABS[Math.floor(rnd(0, BTN_GRABS.length))];
+      g = a.btnGrab;
+    }
     if (IN.kb.KeyG && IN.kb.ShiftLeft || IN.kb.KeyG && IN.kb.ShiftRight) {
       const sq = IN.seq.join(',');
       if (/ArrowUp,ArrowRight/.test(sq)) g = 'japan'; else if (/ArrowDown,ArrowLeft/.test(sq)) g = 'method'; else if (/ArrowDown,ArrowRight/.test(sq)) g = 'fashion';
@@ -1656,6 +1670,7 @@ function updateRider(dt, t) {
       }
       if (['japan', 'method', 'fashion'].includes(g)) a.grabFirst = g;
       a.grab = a.grab || g; a.grabT += dt;
+      if (centerHold && a.grabT > 0.55 && !a.tweak && ['indy', 'mute', 'melon', 'stale'].includes(g)) a.tweak = rnd() < 0.5 ? 'Tweak' : 'Poke';   // aguantándolo: lo estira
       if (!a.grabs.includes(g)) a.grabs.push(g);
     } else { a.grab = null; }
     R.crouch = lerp(R.crouch, a.grab ? 1 : (a.raley > 0.2 ? 0.2 : 0.62), clamp(dt * 8, 0, 1));
@@ -1682,6 +1697,11 @@ function updateRider(dt, t) {
     tmp.q2.setFromAxisAngle(a.flipAxis === 'x' ? V3(1, 0, 0) : V3(0, 0, 1), a.flip);
     riderRoot.quaternion.copy(a.baseQ).multiply(tmp.q).multiply(tmp.q2);
     if (a.raley > 0) riderRoot.rotateX(-1.35 * ss(a.raley));    // raley: el cuerpo estirado y la tabla por encima
+    // grab con estilo: la tabla tirada hacia un lado (como en las fotos) y más cuanto más se aguanta
+    const ST = { indy: [0.38, 0.08], mute: [0.32, 0.2], melon: [-0.38, 0.12], stale: [-0.36, -0.06], nose: [0.05, 0.42], tail: [0.05, -0.45], method: [-0.7, 0.4], japan: [0.55, 0.35], fashion: [-0.4, -0.3] }[a.grab] || [0, 0];
+    const kk = a.grab ? (a.tweak ? 1.35 : 1) : 0;
+    a.styX = lerp(a.styX || 0, ST[0] * kk, clamp(dt * 7, 0, 1)); a.styZ = lerp(a.styZ || 0, ST[1] * kk, clamp(dt * 7, 0, 1));
+    if (Math.abs(a.styX) + Math.abs(a.styZ) > 0.002) { riderRoot.rotateX(a.styX * (R.sw ? -1 : 1)); riderRoot.rotateZ(a.styZ); }
   } else if (R.state === 'fallen') {
     riderRoot.rotation.set(0, R.yaw, 0); riderRoot.rotateX(-1.25); riderRoot.rotateY(R.fallT * R.fallSpin * Math.max(0, 1 - R.fallT));
   } else {
@@ -1720,7 +1740,7 @@ function updateRider(dt, t) {
   if (R.state === 'air' && R.air && !R.air.grab && R.vy < 0 && R.y - sH < 0.7) R.crouch = lerp(R.crouch, 0.3, clamp(dt * 10, 0, 1));   // estira las piernas antes de caer
   // --- postura y cuerpo
   const a = R.air;
-  const gp = a && a.grab ? ({ japan: 'indy', method: 'stale', fashion: 'stale' }[a.grab] || a.grab) : null;
+  const gp = a && a.grab ? ({ japan: 'mute', method: 'melon', fashion: 'stale' }[a.grab] || a.grab) : null;
   computePose(R.crouch, R.state === 'air' ? 0 : R.lean, gp, gp ? 1 : 0, R.state !== 'fallen', a ? a.raley : 0, R.sw ? -1 : 1);
   poseBody(J);
   // --- cuerda: del punto de remolque de la torre a la maneta (que está en las manos de verdad)
@@ -1917,7 +1937,7 @@ function handWorld(out) {
   const a = RIDER.air, g = a && a.grab;
   const pl = SENEN.knuckL.getWorldPosition(tmp.n), pr = SENEN.knuckR.getWorldPosition(tmp.c);
   const hh = RIDER.state === 'ride' ? holdingHand() : null;
-  if (g && RIDER.state === 'air') { const frontGrabs = g === 'nose'; out.copy(frontGrabs ? pr : pl); }   // delante = mano izquierda
+  if (g && RIDER.state === 'air') { const gg = { japan: 'mute', method: 'melon', fashion: 'stale' }[g] || g, gh = (GRAB_POS[gg] || [0, 'B'])[1], rope = gh === 'F' ? 'B' : 'F'; out.copy((rope === 'F') === !!SENEN.LF ? pl : pr); }   // la otra mano lleva la cuerda
   else if (hh) out.copy((hh === 'F') === !!SENEN.LF ? pl : pr);           // con una mano: la de la maneta
   else out.addVectors(pl, pr).multiplyScalar(0.5);
   return true;
@@ -2065,7 +2085,7 @@ function netSend(dt) {
   if (!NET.connected || !NET.me) return;
   NET.sendT -= dt; if (NET.sendT > 0) return; NET.sendT = 0.12;
   const R = RIDER, a = R.air, q = riderRoot.quaternion, rp = riderRoot.position, r2 = v => Math.round(v * 100) / 100, r3 = v => Math.round(v * 1000) / 1000;
-  const gp = a && a.grab ? ({ japan: 'indy', method: 'stale', fashion: 'stale' }[a.grab] || a.grab) : '';
+  const gp = a && a.grab ? ({ japan: 'mute', method: 'melon', fashion: 'stale' }[a.grab] || a.grab) : '';
   const st = {
     n: ($('nick').value.trim() || RIDER_INFO[RIDER_NAME][0]).slice(0, 16), b: boardIdx, p: GAME.running ? 1 : 0, ln: NET.lane, s: R.score,
     dx: r2(rp.x - boat.position.x), dy: r2(rp.y), dz: r2(rp.z - boat.position.z), q: [r3(q.x), r3(q.y), r3(q.z), r3(q.w)],
@@ -2122,7 +2142,24 @@ function onNetMsg(m) {
 // el botón rojo mientras se puede empujar
 function drawPushBtn() {
   const on = !!NET.pushTarget, el = $('stR'), k = el.querySelector('.knob');
-  if (el.classList.contains('push') !== on) { el.classList.toggle('push', on); k.textContent = on ? 'EMPUJAR' : 'OLLIE'; }
+  const txt = on ? 'EMPUJAR' : RIDER.state === 'air' ? 'GRAB' : 'OLLIE';
+  if (el.classList.contains('push') !== on) el.classList.toggle('push', on);
+  el.classList.toggle('grab', !on && txt === 'GRAB');
+  if (k.textContent !== txt) k.textContent = txt;
+}
+{ const st = document.createElement('style'); st.textContent = `
+  #stR.grab .knob { background: rgba(195,245,58,.55) !important; border-color: #f4ffd8 !important; color: #10220a; font-size: 10px !important; }
+  #bMenu { position: absolute; left: max(14px, env(safe-area-inset-left)); top: calc(112px + env(safe-area-inset-top)); pointer-events: auto;
+    font: 800 11px system-ui, sans-serif; letter-spacing: .12em; color: #fff; background: rgba(0,0,0,.28); border: 1.5px solid rgba(255,255,255,.8); border-radius: 14px; padding: 4px 10px; }`;
+  document.head.appendChild(st); }
+// botón pequeño arriba para volver al menú desde el agua (la sesión se guarda)
+{ const b = document.createElement('button'); b.id = 'bMenu'; b.textContent = '☰ MENÚ'; $('hud').appendChild(b);
+  b.addEventListener('click', e => {
+    e.stopPropagation();
+    try { recSave(); } catch (er) {}
+    GAME.running = false; GAME.paused = false; msg(''); $('hud').hidden = true; $('menu').hidden = false; showPanel('pMain');
+    try { musicUpdate(); } catch (er) {}
+  });
 }
 
 // ---- RÉCORDS: se guardan en la sala «wake-records» (uno por móvil, sin cuenta) y salen en el menú
