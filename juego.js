@@ -1184,6 +1184,73 @@ function setLandRing(frac, ok) {
 }
 
 // =====================================================================================
+//  SONIDO (sintetizado, sin archivos): el mar y el viento de fondo, el motor de la Tatanka, el siseo del canto
+//  al cortar el agua, el golpe al saltar y la salpicadura al caer (más fuerte cuanto más alto y si te caes)
+// =====================================================================================
+const SFX = { ctx: null, on: true, carve: null, engine: null, amb: null };
+try { SFX.on = localStorage.getItem('wake-sound') !== 'off'; } catch (e) {}
+function sfxInit() {
+  if (SFX.ctx) { if (SFX.ctx.state === 'suspended') SFX.ctx.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+  const C = SFX.ctx = new AC();
+  const len = C.sampleRate * 2, buf = C.createBuffer(1, len, C.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  SFX.noise = buf;
+  SFX.master = C.createGain(); SFX.master.gain.value = SFX.on ? 0.9 : 0; SFX.master.connect(C.destination);
+  const loop = (freq, type, q, gain) => {
+    const src = C.createBufferSource(); src.buffer = buf; src.loop = true; src.playbackRate.value = 0.5 + Math.random() * 0.5;
+    const f = C.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = C.createGain(); g.gain.value = gain; src.connect(f); f.connect(g); g.connect(SFX.master); src.start();
+    return { src, f, g };
+  };
+  // mar: rumor grave que sube y baja como las olas
+  SFX.amb = loop(420, 'lowpass', 0.7, 0.05);
+  const lfo = C.createOscillator(), lg = C.createGain(); lfo.frequency.value = 0.13; lg.gain.value = 0.03; lfo.connect(lg); lg.connect(SFX.amb.g.gain); lfo.start();
+  SFX.wind = loop(950, 'bandpass', 0.6, 0.018);
+  // motor fueraborda: zumbido grave con algo de vibración
+  const eg = C.createGain(); eg.gain.value = 0; const ef = C.createBiquadFilter(); ef.type = 'lowpass'; ef.frequency.value = 260; ef.connect(eg); eg.connect(SFX.master);
+  for (const [fq, ty, v] of [[46, 'sawtooth', 0.6], [92, 'square', 0.25], [138, 'sawtooth', 0.15]]) { const o = C.createOscillator(), g = C.createGain(); o.type = ty; o.frequency.value = fq; g.gain.value = v; o.connect(g); g.connect(ef); o.start(); }
+  const vib = C.createOscillator(), vg = C.createGain(); vib.frequency.value = 7; vg.gain.value = 0.012; vib.connect(vg); vg.connect(eg.gain); vib.start();
+  SFX.engine = eg;
+  // el canto de la tabla cortando el agua
+  SFX.carve = loop(1700, 'bandpass', 0.9, 0);
+}
+function sfxBurst(dur, f0, f1, gain, type = 'lowpass', q = 0.8) {
+  if (!SFX.ctx || !SFX.on) return;
+  const C = SFX.ctx, t = C.currentTime, src = C.createBufferSource(); src.buffer = SFX.noise; src.playbackRate.value = 0.8 + Math.random() * 0.4;
+  const f = C.createBiquadFilter(); f.type = type; f.Q.value = q; f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  const g = C.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f); f.connect(g); g.connect(SFX.master); src.start(t, Math.random()); src.stop(t + dur + 0.05);
+}
+function sfxThump(freq, gain, dur) {
+  if (!SFX.ctx || !SFX.on) return;
+  const C = SFX.ctx, t = C.currentTime, o = C.createOscillator(), g = C.createGain();
+  o.frequency.setValueAtTime(freq, t); o.frequency.exponentialRampToValueAtTime(freq * 0.45, t + dur);
+  g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(SFX.master); o.start(t); o.stop(t + dur + 0.05);
+}
+function sfxSplash(k) {            // la tabla golpea el agua al caer (k ≈ 0.3 un bote … 1.5 una caída)
+  k = clamp(k, 0.2, 1.6);
+  sfxThump(95, 0.35 * k, 0.18);
+  sfxBurst(0.35 + 0.35 * k, 3200, 380, 0.32 * k);
+  if (k > 0.8) setTimeout(() => sfxBurst(0.9, 1400, 250, 0.12 * k), 120);   // el agua que vuelve a caer
+}
+function sfxPop(q) { sfxThump(140, 0.18 + 0.12 * q, 0.12); sfxBurst(0.28, 900, 2600, 0.12 + 0.1 * q, 'bandpass', 1.2); }   // el canto suelta el agua y sale volando
+function sfxUpdate() {
+  if (!SFX.ctx) return;
+  const C = SFX.ctx, t = C.currentTime, R = RIDER;
+  const riding = (R.state === 'ride' || R.state === 'start') && !GAME.paused;
+  const lat = Math.abs(R.omega) * ROPE;                                      // velocidad lateral al carvear
+  const cv = riding ? clamp(0.03 + lat / 9 * 0.14 + (R.grind ? 0.08 : 0) + (R.manualT ? 0.04 : 0), 0, 0.22) : 0;
+  SFX.carve.g.gain.setTargetAtTime(cv, t, 0.08);
+  SFX.carve.f.frequency.setTargetAtTime(1300 + lat * 120, t, 0.1);
+  SFX.engine.gain.setTargetAtTime(GAME.paused ? 0 : (CAM.mode === 2 ? 0.07 : 0.035), t, 0.3);
+  SFX.master.gain.setTargetAtTime(SFX.on && !GAME.paused ? 0.9 : 0, t, 0.05);
+}
+addEventListener('pointerdown', sfxInit, { capture: true }); addEventListener('keydown', sfxInit, { capture: true });
+document.addEventListener('visibilitychange', () => { if (!SFX.ctx) return; if (document.hidden) SFX.ctx.suspend(); else SFX.ctx.resume(); });
+
+// =====================================================================================
 //  EL RIDER: cuerda, carving, pop, aire, trucos, aterrizaje y caídas
 // =====================================================================================
 let ROPE = 22.9;   // 75 pies, como en Pocket Shredders (online: cada uno con un largo distinto)
@@ -1257,6 +1324,7 @@ function endManual() {
   say(`Manual<small>+${pts.toLocaleString('es-ES')}</small>`, '', 1.5);
 }
 function pop(q, kind, popPos) {
+  sfxPop(kind === 'hop' ? 0.1 : q);
   if (RIDER.manualT) endManual();   // manual to ollie
   const R = RIDER, f = wakeFrame(R.pos.x, R.pos.z), A = wakeAmp(f.d) / WAKE.amp, S = R.lastS;
   const vlat = Math.abs(R.omega) * ROPE;
@@ -1300,6 +1368,7 @@ function getUp() {
   const R = RIDER; R.state = 'start'; R.startT = 0; R.theta = 0.05; R.omega = 0; R.y = 0; R.vy = 0; R.armed = false; R.wrapped = 0; msg('');
 }
 function fall(reason) {
+  sfxSplash(1.5);
   const R = RIDER; R.state = 'fallen'; R.fallT = 0; R.banger = 0; R.bangerOn = false; R.twoUp = 0; updateMeters();
   R.fallVel = R.vel.clone(); R.fallSpin = rnd(-3, 3);
   say(`<span class="fall">${reason || '¡AL AGUA!'}</span>`, '', 1.8);
@@ -1363,6 +1432,7 @@ function trickName(a, halfTurns, flips, deg) {
 
 function land() {
   const R = RIDER, a = R.air;
+  sfxSplash(0.35 + Math.min(1, Math.abs(R.vy) / 9) * 0.8);
   R.armed = false;   // el tip flip armado no pasa al siguiente salto
   R.lastLand = { spin: +a.spin.toFixed(2), flip: +a.flip.toFixed(2), t: +a.t.toFixed(2), spinning: a.spinning, flipping: a.flipping };
   const halfTurns = Math.round(a.spin / Math.PI), spinErr = Math.abs(a.spin - halfTurns * Math.PI);
@@ -2107,6 +2177,11 @@ $('place').textContent = 'TATANKA · PUERTO DE SAGUNTO';
 const voiceEl = document.createElement('audio'); voiceEl.setAttribute('playsinline', ''); document.body.appendChild(voiceEl);
 const micBtn = document.createElement('button'); micBtn.id = 'bMic'; micBtn.textContent = '🎤'; micBtn.setAttribute('aria-label', 'Mantén pulsado para grabar una nota de voz');
 $('bCam').after(micBtn);
+// botón del sonido (se recuerda en el móvil)
+const sndBtn = document.createElement('button'); sndBtn.id = 'bSnd'; sndBtn.setAttribute('aria-label', 'Sonido');
+const sndIcon = () => { sndBtn.textContent = SFX.on ? '🔊' : '🔇'; };
+sndIcon(); micBtn.after(sndBtn);
+sndBtn.addEventListener('click', e => { e.stopPropagation(); SFX.on = !SFX.on; sndIcon(); try { localStorage.setItem('wake-sound', SFX.on ? 'on' : 'off'); } catch (er) {} sfxInit(); });
 { const st = document.createElement('style'); st.textContent = `
   #bMic.rec { background: #ff5a4e !important; border-color: #fff !important; animation: micpulse .45s ease-in-out infinite alternate; }
   @keyframes micpulse { from { transform: scale(1); } to { transform: scale(1.15); } }
@@ -2204,7 +2279,7 @@ function updatePeers(dt) {
 //  BUCLE
 // =====================================================================================
 const GAME = { running: false, paused: false, t: 0 };
-function togglePause() { if (!GAME.running) return; GAME.paused = !GAME.paused; msg(GAME.paused ? 'PAUSA' : ''); }
+function togglePause() { if (!GAME.running) return; GAME.paused = !GAME.paused; msg(GAME.paused ? 'PAUSA' : ''); sfxUpdate(); }
 $('bPause').onclick = togglePause; $('bCam').onclick = nextCam;
 // Omar y su tabla (si el móvil tiene guardado un index.html viejo sin ellos, se añaden aquí)
 if (!document.querySelector('#riders .opt[data-r="omar"]')) {
@@ -2368,6 +2443,7 @@ function frame() {
     updateSpray(dt);
     updateTrail(dt, t);
     updatePeers(dt);
+    sfxUpdate();
     checkPush(); drawPushBtn();
     netSend(dt);
     if (GAME.running) recTick(dt);
