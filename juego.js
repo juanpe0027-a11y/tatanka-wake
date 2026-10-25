@@ -1145,6 +1145,7 @@ addEventListener('pointerup', endTouch); addEventListener('pointercancel', endTo
 addEventListener('keydown', e => {
   if (e.repeat) return;
   IN.kb[e.code] = true;
+  if (e.code === 'Space') IN.spaceT0 = performance.now();
   if (e.code === 'KeyC') nextCam();
   if (e.code === 'KeyP') togglePause();
   if (e.code === 'KeyV') surface180();
@@ -1373,7 +1374,7 @@ function pop(q, kind, popPos) {
   const toe = R.vel.clone().setY(0).dot(tmp.c) > 0;
   const heel = !toe;
   const air = {
-    t: 0, spin: 0, spinDir: 0, spinning: false, maxSpinAbs: 0, rewound: false,
+    t: 0, t0: performance.now(), spin: 0, spinDir: 0, spinning: false, maxSpinAbs: 0, rewound: false,
     flip: 0, flipAxis: 'x', flipDir: 0, flipping: false, flipDone: false, flipName: '', flipKind: '',
     grab: null, grabFirst: null, grabT: 0, grabs: [], tweak: null, tweakT: 0, other: R.otherHand,
     baseQ: riderRoot.quaternion.clone(), toe, kind, quality: q, du, wrapped: R.wrapped, autoSpin: 0,
@@ -1673,7 +1674,9 @@ function updateRider(dt, t) {
     if (a.whirly) { a.flip = Math.min(TAU, a.flip + 6.5 * dt); if (a.flip >= TAU) a.flipping = false; if (ry < -0.4) { a.spin += 5 * fast * dt; } }
     // ---- grabs con L (y tweak: deslizar a otra dirección sin levantar el dedo). Teclado: Mayús+G y flechas
     let g = grabFor(S.L.x, S.L.y, a.toe !== R.sw);
-    const centerHold = S.R.hold && Math.abs(S.R.x) < 0.01 && Math.abs(S.R.y) < 0.01 && !NET.pushTarget;
+    // solo si se pulsa YA en el aire (el dedo que estaba agachando para saltar no cuenta)
+    const freshPress = IN.R.on ? IN.R.t0 > a.t0 : (IN.kb.Space && (IN.spaceT0 || 0) > a.t0);
+    const centerHold = S.R.hold && freshPress && Math.abs(S.R.x) < 0.01 && Math.abs(S.R.y) < 0.01 && !NET.pushTarget;
     if (!g && centerHold) {
       if (!a.btnGrab) a.btnGrab = BTN_GRABS[Math.floor(rnd(0, BTN_GRABS.length))];
       g = a.btnGrab;
