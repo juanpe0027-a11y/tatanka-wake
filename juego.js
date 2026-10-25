@@ -2364,11 +2364,44 @@ musPick.onchange = () => {
 };
 musOff.onclick = () => { MUSIC.on = !MUSIC.on; try { localStorage.setItem('wake-music', MUSIC.on ? 'on' : 'off'); } catch (e) {} musicLabel(); musicUpdate(); };
 function musicUpdate() {   // suena mientras navegas (no en pausa, ni en el menú, ni con el sonido quitado)
+  if (typeof ytUpdate === 'function') ytUpdate();
   const want = MUSIC.has && MUSIC.on && SFX.on && GAME.running && !GAME.paused && !document.hidden;
   if (want && MUSIC.el.paused) { const pr = MUSIC.el.play(); if (pr && pr.catch) pr.catch(() => {}); }
   else if (!want && !MUSIC.el.paused) MUSIC.el.pause();
 }
 document.addEventListener('visibilitychange', musicUpdate);
+// ---- MÚSICA DE YOUTUBE para todos: el vídeo oficial de «Insane in the Brain» (canal CypressHillVEVO),
+//      reproducido con el reproductor de YouTube (no se copia la canción). El reproductor no se ve: solo suena.
+//      Si en el móvil se ha elegido una canción propia, suena esa
+const YTM = { id: 'RijB8wnJCN0', title: 'Cypress Hill · Insane in the Brain', player: null, ready: false, on: true, playing: false };
+try { YTM.on = localStorage.getItem('wake-yt') !== 'off'; } catch (e) {}
+{ const st = document.createElement('style'); st.textContent = `
+  #ytBox { position: fixed; z-index: -1; width: 200px; height: 113px; left: 0; bottom: 0; opacity: 0.001; pointer-events: none; overflow: hidden; }   /* solo suena: no se ve */
+  #ytBox iframe { width: 100%; height: 100%; border: 0; }`; document.head.appendChild(st); }
+const ytBox = document.createElement('div'); ytBox.id = 'ytBox'; ytBox.innerHTML = '<div id="ytPlayer"></div>'; document.body.appendChild(ytBox);
+window.onYouTubeIframeAPIReady = () => {
+  YTM.player = new window.YT.Player('ytPlayer', {
+    videoId: YTM.id, width: 200, height: 113,
+    playerVars: { playsinline: 1, controls: 1, rel: 0, modestbranding: 1, loop: 1, playlist: YTM.id },
+    events: {
+      onReady: () => { YTM.ready = true; YTM.player.setVolume(60); ytUpdate(); },
+      onError: e => { YTM.err = e.data; console.warn('YouTube error', e.data); },
+      onStateChange: e => { if (e.data === 0) { YTM.player.seekTo(0); YTM.player.playVideo(); } YTM.playing = e.data === 1; },
+    },
+  });
+};
+loadScript('https://www.youtube.com/iframe_api').catch(() => {});
+function ytWanted() { return YTM.on && !(MUSIC.has && MUSIC.on) && SFX.on && GAME.running && !GAME.paused && !document.hidden; }
+function ytUpdate() {
+  const want = ytWanted();
+  if (!YTM.ready) return;
+  try { if (want && !YTM.playing) YTM.player.playVideo(); else if (!want && YTM.playing) YTM.player.pauseVideo(); } catch (e) {}
+}
+const ytBtn = document.createElement('button'); ytBtn.className = 'mbtn'; ytBtn.id = 'ytBtn';
+const ytLabel = () => { ytBtn.textContent = '▶ YouTube: ' + (YTM.on ? 'Insane in the Brain' : 'no'); };
+ytLabel(); musBtn.before(ytBtn);
+ytBtn.onclick = () => { YTM.on = !YTM.on; try { localStorage.setItem('wake-yt', YTM.on ? 'on' : 'off'); } catch (e) {} ytLabel(); ytUpdate(); };
+document.addEventListener('visibilitychange', ytUpdate);
 $('camBtn').onclick = () => { setCam((CAM.mode + 1) % CAM.names.length); $('camBtn').textContent = 'Cámara: ' + CAM.names[CAM.mode].toLowerCase(); };
 // en el móvil se pone en pantalla completa sola al primer toque (el navegador no deja hacerlo sin tocar)
 function autoFullscreen(e) {
