@@ -505,27 +505,86 @@ const PIER_X = 900, GROIN_X = 300, MARINA_X = -200;
     }
     rocks.castShadow = true; rocks.receiveShadow = true; world.add(rocks);
   }
-  // ---- Puerto Siles (Canet): escollera de la bocana y amarres con veleros y lanchas
+  // ---- Puerto Siles (Canet), como en Google Earth: la dársena rectangular pegada a la playa, el dique norte,
+  //      la escollera grande por fuera (con el paseo de hormigón encima) que se dobla hacia tierra en la bocana,
+  //      el espigón corto del sur, los pantalanes llenos de barcos y el bosque de mástiles de los veleros
   {
-    const n = 1100, rocks = new T.InstancedMesh(new T.DodecahedronGeometry(1, 0), MAT(0x8a7a64, 0.95), n), o = new T.Object3D();
-    const curve = new T.CatmullRomCurve3([V3(MARINA_X, 0, SHORE_Z + 5), V3(MARINA_X + 10, 0, SHORE_Z - 120), V3(MARINA_X - 30, 0, SHORE_Z - 230), V3(MARINA_X - 160, 0, SHORE_Z - 260)]);
-    for (let i = 0; i < n; i++) {
-      const t = rnd(), p = curve.getPoint(t), xr = rnd(-1, 1);
-      o.position.set(p.x + xr * 9, Math.max(-1.2, 3.2 * (1 - Math.abs(xr) ** 1.5) - rnd(0, 1.4)), p.z + rnd(-4, 4));
-      o.rotation.set(rnd(0, 6), rnd(0, 6), rnd(0, 6)); const s = rnd(1.3, 2.8); o.scale.set(s, s * 0.8, s); o.updateMatrix(); rocks.setMatrixAt(i, o.matrix);
+    const X0 = MARINA_X - 280, X1 = MARINA_X, ZE = SHORE_Z - 205;     // dique norte · fondo sur de la dársena · escollera
+    const rockM = MAT(0x8a7a64, 0.95), o = new T.Object3D();
+    const rockSets = [];
+    function breakwater(pts, width, h, n) {                             // escollera de bloques a lo largo de una curva
+      const curve = new T.CatmullRomCurve3(pts.map(([x, z]) => V3(x, 0, z)));
+      rockSets.push({ curve, width, h, n });
     }
-    world.add(rocks);
-    // faro rojo en la punta de la bocana
-    const lh = new T.Mesh(new T.CylinderGeometry(0.9, 1.2, 7, 14), MAT(0xc7302c, 0.5)); lh.position.set(MARINA_X - 160, 5, SHORE_Z - 260); world.add(lh);
-    box(220, 1.2, 40, conc, MARINA_X - 120, 0.4, SHORE_Z + 20, world, false);        // muelle de la marina
-    const hullG = new T.CapsuleGeometry(1.1, 6, 4, 8); hullG.rotateZ(Math.PI / 2); hullG.scale(1, 0.55, 1);
-    const hulls = new T.InstancedMesh(hullG, MAT(0xf4f4f2, 0.3), 90), masts = new T.InstancedMesh(new T.CylinderGeometry(0.07, 0.09, 13, 6), MAT(0xdadde0, 0.3, 0.8), 90);
-    for (let i = 0; i < 90; i++) {
-      const row = i % 5, k = Math.floor(i / 5);
-      o.position.set(MARINA_X - 25 - k * 7.5, 0.25, SHORE_Z - 30 - row * 38); o.rotation.set(0, Math.PI / 2, 0); o.scale.setScalar(rnd(0.75, 1.15)); o.updateMatrix(); hulls.setMatrixAt(i, o.matrix);
-      o.position.y = 6.8; o.rotation.set(0, 0, 0); o.scale.set(1, (i % 3 === 0) ? 0.001 : rnd(0.8, 1.2), 1); o.updateMatrix(); masts.setMatrixAt(i, o.matrix);
+    breakwater([[X0, SHORE_Z + 4], [X0, SHORE_Z - 100], [X0, ZE]], 11, 3.2, 700);                                   // dique norte
+    breakwater([[X0, ZE], [X0 + 140, ZE - 4], [X1, ZE - 2], [X1 + 55, ZE + 6], [X1 + 78, ZE + 30], [X1 + 72, ZE + 58]], 16, 3.8, 1700);   // escollera exterior y su codo
+    breakwater([[X1 + 6, SHORE_Z + 2], [X1 + 18, SHORE_Z - 40], [X1 + 34, SHORE_Z - 70]], 9, 2.6, 300);              // espigón sur
+    const total = rockSets.reduce((q, r) => q + r.n, 0), rocks = new T.InstancedMesh(new T.DodecahedronGeometry(1, 0), rockM, total);
+    let ri = 0;
+    for (const r of rockSets) for (let i = 0; i < r.n; i++) {
+      const t = rnd(), p = r.curve.getPoint(t), tg = r.curve.getTangent(t), nx = -tg.z, nz = tg.x, xr = rnd(-1, 1);
+      o.position.set(p.x + nx * xr * r.width * 0.5, Math.max(-1.3, r.h * (1 - Math.abs(xr) ** 1.6) - rnd(0, 1.2)), p.z + nz * xr * r.width * 0.5);
+      o.rotation.set(rnd(0, 6), rnd(0, 6), rnd(0, 6)); const sc = rnd(1.3, 2.9); o.scale.set(sc, sc * 0.8, sc); o.updateMatrix(); rocks.setMatrixAt(ri++, o.matrix);
     }
-    world.add(hulls, masts);
+    rocks.castShadow = true; rocks.receiveShadow = true; world.add(rocks);
+    // paseo de hormigón y muro encima de la escollera exterior (se ve desde el mar por encima de las rocas)
+    const concM = MAT(0xc9c3b6, 0.9), wallM = MAT(0xb3ad9f, 0.9);
+    box(X1 + 40 - X0, 1.0, 6, concM, (X0 + X1 + 40) / 2, 3.6, ZE + 5, world, false);
+    box(X1 + 40 - X0, 2.2, 1.2, wallM, (X0 + X1 + 40) / 2, 4.6, ZE - 1.5, world);
+    // muelles de hormigón de dentro: el de tierra, el del dique norte y la explanada central del sur
+    box(X1 - X0, 1.2, 16, concM, (X0 + X1) / 2, 0.6, SHORE_Z - 6, world, false);
+    box(14, 1.2, SHORE_Z - ZE - 10, concM, X0 + 10, 0.6, (SHORE_Z + ZE) / 2, world, false);
+    box(36, 1.2, 70, concM, X1 - 50, 0.6, SHORE_Z - 50, world, false);
+    // pantalanes flotantes y los barcos amarrados a los dos lados
+    const pontM = MAT(0x9a8f80, 0.85), pontoons = [];
+    for (let k = 0; k < 5; k++) pontoons.push({ x: X0 + 40 + k * 36, z0: SHORE_Z - 16, z1: ZE + 22, along: 'z' });   // los del norte, hacia fuera
+    for (let k = 0; k < 3; k++) pontoons.push({ z: SHORE_Z - 98 - k * 30, x0: X1 - 160, x1: X1 - 72, along: 'x' });   // los del sur, paralelos a la costa
+    for (const pt of pontoons) {
+      if (pt.along === 'z') box(2.4, 0.5, pt.z0 - pt.z1, pontM, pt.x, 0.3, (pt.z0 + pt.z1) / 2, world, false);
+      else box(pt.x1 - pt.x0, 0.5, 2.4, pontM, (pt.x0 + pt.x1) / 2, 0.3, pt.z, world, false);
+    }
+    const slots = [];
+    for (const pt of pontoons) {
+      if (pt.along === 'z') { for (let z = pt.z0 - 6; z > pt.z1 + 4; z -= 4.6) for (const sd of [-1, 1]) slots.push([pt.x + sd * 6.5, z, Math.PI / 2]); }
+      else { for (let x = pt.x0 + 5; x < pt.x1 - 4; x += 4.6) for (const sd of [-1, 1]) slots.push([x, pt.z + sd * 6.5, 0]); }
+    }
+    for (let x = X0 + 22; x < X1 - 20; x += 4.8) slots.push([x, ZE + 12, Math.PI / 2 + 0.0001]);      // abarloados a la escollera por dentro
+    const N = slots.length;
+    const hullG = new T.CapsuleGeometry(1.15, 6.5, 4, 10); hullG.rotateX(Math.PI / 2); hullG.scale(1, 0.55, 1);
+    const cabG = new T.BoxGeometry(1.6, 1.0, 3.2);
+    const hulls = new T.InstancedMesh(hullG, MAT(0xffffff, 0.3), N), cabs = new T.InstancedMesh(cabG, MAT(0xffffff, 0.35), N);
+    const masts = new T.InstancedMesh(new T.CylinderGeometry(0.1, 0.16, 1, 6), MAT(0xaeb3b8, 0.3, 0.7), N);   // gruesos para que se vean desde lejos
+    const booms = new T.InstancedMesh(new T.CylinderGeometry(0.05, 0.05, 1, 5), MAT(0xd0d2d4, 0.3, 0.8), N);
+    const covers = new T.InstancedMesh(new T.CylinderGeometry(0.18, 0.18, 1, 6), MAT(0x1f3f6b, 0.8), N);   // fundas azules de las velas
+    const hc = [0xffffff, 0xffffff, 0xffffff, 0xf2f0ea, 0x1d3557, 0xffffff, 0xe8e4da], col = new T.Color();
+    for (let i = 0; i < N; i++) {
+      const [x, z, ry] = slots[i], sail = rnd() < 0.62, L = rnd(0.75, 1.3);
+      o.position.set(x, 0.35, z); o.rotation.set(0, ry + rnd(-0.04, 0.04), 0); o.scale.set(L, L * rnd(0.9, 1.1), L); o.updateMatrix();
+      hulls.setMatrixAt(i, o.matrix); hulls.setColorAt(i, col.set(hc[(i * 5) % hc.length]));
+      o.position.set(x, 1.1 * L, z); o.scale.set(L, L * (sail ? 0.8 : 1.3), L); o.updateMatrix(); cabs.setMatrixAt(i, o.matrix);
+      const mh = sail ? rnd(12, 19) * L : 0.001;                    // el mástil: lo que se ve por encima de la escollera
+      o.position.set(x, 0.9 + mh / 2, z); o.rotation.set(0, 0, 0); o.scale.set(1, mh, 1); o.updateMatrix(); masts.setMatrixAt(i, o.matrix);
+      // botavara (y la funda de la vela) a lo largo del barco, a 2 m del puente
+      const ax = ry < 0.5 ? V3(0, 0, 1) : V3(1, 0, 0), bl = sail ? 4.2 * L : 0.001;
+      o.position.set(x + ax.x * bl * 0.45, 2.6 * L, z + ax.z * bl * 0.45); o.quaternion.setFromUnitVectors(UP, ax); o.scale.set(1, bl, 1); o.updateMatrix(); booms.setMatrixAt(i, o.matrix);
+      o.position.y += 0.22; o.scale.set(1, bl * 0.9, 1); o.updateMatrix(); covers.setMatrixAt(i, o.matrix);
+      o.quaternion.identity();
+    }
+    for (const m of [hulls, cabs, masts]) { m.castShadow = true; }
+    world.add(hulls, cabs, masts, booms, covers);
+    // luces de la bocana: roja en la punta de la escollera, verde en el espigón sur
+    for (const [x, z, c] of [[X1 + 72, ZE + 58, 0xc7302c], [X1 + 34, SHORE_Z - 70, 0x2e8b45]]) {
+      const tw = new T.Mesh(new T.CylinderGeometry(0.8, 1.1, 6, 14), MAT(c, 0.5)); tw.position.set(x, 6, z); world.add(tw);
+      const lt = new T.Mesh(new T.CylinderGeometry(0.55, 0.55, 1.2, 10), MAT(0xffffff, 0.3, 0, { emissive: c, emissiveIntensity: 0.6 })); lt.position.set(x, 9.6, z); world.add(lt);
+    }
+    // el club náutico (edificio blanco con cristaleras) y las naves de la marina
+    const white = MAT(0xf1efe9, 0.7), glass = MAT(0x5d7f95, 0.15, 0.6);
+    box(60, 9, 24, white, X1 - 70, 4.5, SHORE_Z + 26, world);
+    box(58, 3, 0.6, glass, X1 - 70, 6, SHORE_Z + 13.7, world, false);
+    box(64, 1, 28, MAT(0x2b5c8a, 0.6), X1 - 70, 9.5, SHORE_Z + 26, world);
+    for (let k = 0; k < 4; k++) box(26, 7, 16, white, X0 + 30 + k * 40, 3.5, SHORE_Z + 22, world);
+    // grúa de varada
+    box(1, 9, 1, MAT(0x3b6fb0, 0.5, 0.4), X1 - 20, 5, SHORE_Z - 12, world); box(10, 1, 1, MAT(0x3b6fb0, 0.5, 0.4), X1 - 16, 9.5, SHORE_Z - 12, world);
   }
   const cc = [0xa2433a, 0x2d6688, 0xc89b3b, 0x3b7a4e, 0xd9d5cc, 0x7a2f2a];
   for (let i = 0; i < 160; i++) {
