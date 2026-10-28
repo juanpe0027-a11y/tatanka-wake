@@ -1463,7 +1463,10 @@ function pop(q, kind, popPos) {
   R.vy = (1.7 + 5.0 * q * clamp(A, 0.25, 1.2) * clamp(vlat / 6, 0.3, 1.2)) * big * (du ? 1.5 : 1);
   if (kind === 'ollie') R.vy = 2.4 + 1.3 * q + (R.rollers ? 1 : 0);
   if (kind === 'hop') R.vy = 1.2;
-  if (kind === 'kicker') R.vy = 10.5 + (R.bangerOn ? 1 : 0);   // la rampa lanza bien alto
+  if (kind === 'kicker') {   // la rampa lanza según la velocidad con la que se llega (inercia), más el OLLIE en la rampa
+    const m = RIDER.onKicker || (kickerUnder() || {}).m, along = m ? Math.max(0, R.vel.x * m.dir) : 10;
+    R.vy = clamp(6 + 0.45 * along, 8.5, 12.5) + 2.2 * (R.kickBonus || 0) + (R.bangerOn ? 1 : 0);
+  }
   R.state = 'air';
   chestWorld(tmp.c);
   // de puntas si se va hacia el lado al que mira el pecho (respecto a la estela; la tabla apunta donde va, así que se mira de lado)
@@ -1658,8 +1661,8 @@ function updateRider(dt, t) {
     const kk = kickerUnder();
     if (kk) {   // subiendo la rampa: la tabla va por encima de ella y en el borde sale volando
       R.y = Math.max(lerp(R.y, sH, clamp(dt * 14, 0, 1)), kk.h + 0.03); R.onKicker = kk.m;
-      if (kk.u >= kk.m.L / 2 - 0.05) { R.onKicker = null; pop(1, 'kicker'); }
-    } else { R.onKicker = null; R.y = lerp(R.y, sH, clamp(dt * 14, 0, 1)); }
+      if (kk.u >= kk.m.L / 2 - 0.05) { R.onKicker = null; pop(1, 'kicker'); R.kickBonus = 0; }
+    } else { R.onKicker = null; R.kickBonus = 0; R.y = lerp(R.y, sH, clamp(dt * 14, 0, 1)); }
     // --- en el agua: tap R arma Flip/Raley, círculo con R = mano envuelta, círculo con L = surface 180, tap L = la otra mano
     if (S.R.circle) { R.wrapped = R.wrapped && Math.sign(S.R.circle) !== R.wrapped ? 0 : S.R.circle; say(R.wrapped ? 'Handle wrapped' : 'Unwrapped', '', 0.9); }
     if (S.L.circle) surface180();
@@ -1682,6 +1685,10 @@ function updateRider(dt, t) {
       R.armed = Math.abs(S.R.rel.y) > 0.5 || Math.abs(S.R.rel.x) > 0.5; S.R.y = S.R.rel.y;
       const q0 = clamp(R.ollieArm, 0.3, 1);
       if (R.grind) { endGrind(); pop(0.85, 'wake', 0.5); }
+      else if (R.onKicker) {   // OLLIE soltado subiendo la rampa: no es un ollie pequeño, se suma al salto del borde (mejor cuanto más arriba)
+        const kq = kickerUnder(), up = kq ? clamp((kq.u + kq.m.L / 2) / kq.m.L, 0, 1) : 1;
+        R.kickBonus = Math.max(R.kickBonus || 0, q0 * (0.5 + 0.5 * up));
+      }
       else if (onOuter) { const q = clamp(1 - (u - 1) / 0.75, 0, 1); pop(clamp(q, 0.2, 1), 'wake', 0.5 - 0.5 * (1 - q)); }
       else if (onInner) { const q = clamp((u - 0.5) / 0.5, 0, 1); pop(clamp(q, 0.2, 1), 'wake', 0.5 - 0.5 * (1 - q)); }
       else if (R.lateWin > 0) { pop(R.lateQ, 'wake', 0.5 + 0.5 * (1 - R.lateQ)); }
