@@ -1463,7 +1463,7 @@ function pop(q, kind, popPos) {
   R.vy = (1.7 + 5.0 * q * clamp(A, 0.25, 1.2) * clamp(vlat / 6, 0.3, 1.2)) * big * (du ? 1.5 : 1);
   if (kind === 'ollie') R.vy = 2.4 + 1.3 * q + (R.rollers ? 1 : 0);
   if (kind === 'hop') R.vy = 1.2;
-  if (kind === 'kicker') R.vy = 7.2 + (R.bangerOn ? 0.8 : 0);
+  if (kind === 'kicker') R.vy = 10.5 + (R.bangerOn ? 1 : 0);   // la rampa lanza bien alto
   R.state = 'air';
   chestWorld(tmp.c);
   const toe = R.vel.clone().setY(0).dot(tmp.c) > 0;
@@ -2501,9 +2501,9 @@ document.querySelectorAll('#patrons .opt').forEach(b => b.onclick = () => {
   PATRON = b.dataset.p; try { localStorage.setItem('wake-patron', PATRON); } catch (e) {}
   pickPatron();
 });
-function showPanel(id) { for (const p of ['pMain', 'pChars', 'pControls', 'pStats', 'pResult']) if ($(p)) $(p).hidden = p !== id; }
+function showPanel(id) { for (const p of ['pMain', 'pChars', 'pControls', 'pStats', 'pResult', 'pSettings']) if ($(p)) $(p).hidden = p !== id; }
 $('toChars').onclick = () => showPanel('pChars'); $('charsOk').onclick = () => showPanel('pMain');
-$('toControls').onclick = () => showPanel('pControls'); $('controlsOk').onclick = () => showPanel('pMain');
+$('toControls').onclick = () => showPanel('pControls'); $('controlsOk').onclick = () => showPanel('pSettings');
 // ---- MÚSICA: cada uno elige su canción del móvil. No se sube a internet: se guarda solo en ese móvil
 //      (IndexedDB) y suena durante la sesión, junto con los efectos del agua y del motor
 const MUSIC = { el: document.createElement('audio'), on: true, has: false, name: '' };
@@ -2601,7 +2601,23 @@ function autoFullscreen(e) {
 // la orientación queda libre: se juega en horizontal o en vertical, según se gire el móvil
 function unlockOrientation() { try { const o = screen.orientation; if (o && o.unlock) o.unlock(); } catch (er) {} }
 addEventListener('pointerup', autoFullscreen, true); addEventListener('touchend', autoFullscreen, true);
-$('fsBtn').onclick = () => { const d = document.documentElement; if (document.fullscreenElement) document.exitFullscreen(); else if (d.requestFullscreen) d.requestFullscreen().catch(() => {}); };
+// AJUSTES: volúmenes, cámara y controles en su propia pestaña. La pantalla completa ya se pone sola;
+// el botón solo sale en iPhone/iPad, donde el navegador no deja hacerlo desde la web
+{
+  const pn = document.createElement('div'); pn.className = 'panel wide'; pn.id = 'pSettings'; pn.hidden = true;
+  pn.innerHTML = '<div class="ptitle">Ajustes</div><div id="setBox" style="display:flex;flex-direction:column;gap:12px"></div><nav class="mainmenu" id="setNav"></nav>';
+  $('pMain').after(pn);
+  $('setBox').appendChild(volBox);
+  const nav = $('setNav'); nav.appendChild($('camBtn')); nav.appendChild($('toControls'));
+  const back = document.createElement('button'); back.className = 'btn'; back.textContent = 'Volver'; back.onclick = () => showPanel('pMain'); nav.appendChild(back);
+  const b = document.createElement('button'); b.className = 'mbtn'; b.id = 'toSettings'; b.textContent = 'Ajustes'; b.onclick = () => showPanel('pSettings');
+  $('toStats').after(b);
+  const IOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (!IOS) $('fsBtn').hidden = true;
+}
+$('fsBtn').onclick = () => {
+  if (!document.documentElement.requestFullscreen && !document.fullscreenElement) { $('fsBtn').textContent = 'Compartir → «Añadir a inicio»'; return; }
+   const d = document.documentElement; if (document.fullscreenElement) document.exitFullscreen(); else if (d.requestFullscreen) d.requestFullscreen().catch(() => {}); };
 try { const n = localStorage.getItem('wake-nick'); if (n) $('nick').value = n; } catch (e) {}
 $('nick').addEventListener('input', () => { try { localStorage.setItem('wake-nick', $('nick').value.trim()); } catch (e) {} });
 // ---- SESIONES de 2 minutos y medio: al acabar, la puntuación, el mejor truco y el récord
