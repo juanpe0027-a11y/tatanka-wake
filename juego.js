@@ -1732,7 +1732,7 @@ function updateRider(dt, t) {
       const st = 7.5 * fast * dt * Math.sign(a.autoSpin); a.spin += st; a.autoSpin -= st;
       if (Math.abs(a.autoSpin) < Math.abs(st)) { a.spin += a.autoSpin; a.autoSpin = 0; }
     }
-    if (!a.raleyOn && !a.sbendOn && !a.autoSpin && Math.abs(ry) > 0.35 && !diag) {
+    if (!a.raleyOn && !a.sbendOn && !a.autoSpin && Math.abs(ry) > 0.35 && !diag && Math.abs(ry) > Math.abs(rx)) {   // el dedo en ROLL no gira también
       const dir = Math.sign(ry);
       if (a.spinDir && dir !== a.spinDir && Math.abs(a.spin) > Math.PI * 0.45) a.rewinding = true;
       if (!a.spinDir) a.spinDir = dir;
@@ -1750,7 +1750,8 @@ function updateRider(dt, t) {
     }
     // ---- invert con R a los lados (o en diagonal = mobe). Hacia donde vas o al contrario elige el flip.
     //      Armado (aro azul): tip flip, punta sobre cola. Mantener = doble (con Banger) o triple (con Double Up)
-    if (!a.whirly && !a.raleyOn && !a.sbend && (Math.abs(rx) > 0.45 && (Math.abs(rx) >= Math.abs(ry) || diag))) {
+    const rollIn = !a.whirly && !a.raleyOn && !a.sbend && Math.abs(rx) > 0.45 && (Math.abs(rx) >= Math.abs(ry) || diag);
+    if (rollIn) {
       if (!a.flipName && !a.flipDone) {
         const toward = Math.sign(rx) === travelScreenSign();
         if (R.armed) { a.flipKind = 'tip'; a.flipName = toward ? 'Front Flip' : 'Back Flip'; a.flipAxis = 'z'; a.flipDir = toward ? -1 : 1; R.armed = false; }
@@ -1760,20 +1761,18 @@ function updateRider(dt, t) {
           a.flipAxis = a.flipName === 'Tantrum' ? 'z' : 'x'; a.flipDir = a.flipName === 'Front Roll' ? -1 : 1;
         }
         if (diag && !a.spinDir) a.spinDir = Math.sign(ry);
-      }
-      if (!a.flipDone) {
-        a.flipping = true;
-        const ph = (Math.abs(a.flip) % TAU) / TAU;                    // arranca, acelera a media vuelta y frena para caer
-        a.flip += a.flipDir * 7.6 * fast * (0.7 + 0.6 * Math.sin(Math.PI * ph)) * dt;
-        if (Math.abs(a.flip) >= a.maxFlips * TAU) { a.flip = a.flipDir * a.maxFlips * TAU; a.flipping = false; a.flipDone = true; }
+        a.flipTurns = 1;
       }
       if (diag && !a.autoSpin) { a.spinning = true; a.spin += a.spinDir * 5.2 * fast * dt; }
-    } else if (a.flipping && !a.whirly) {
-      a.flipping = false; a.flipDone = true;        // soltar y volver a empujar no añade otro flip
     }
-    if (!a.flipping && a.flipName && !a.sbend && !a.whirly) {
-      const target = (a.flipDir > 0 ? Math.ceil(a.flip / TAU - 0.05) : Math.floor(a.flip / TAU + 0.05)) * TAU;
-      const st = 7.6 * fast * dt; a.flip = Math.abs(target - a.flip) < st ? target : a.flip + Math.sign(target - a.flip) * st;
+    // la vuelta, una vez empezada, se acaba sola y seguida (soltar el dedo no la para ni la echa atrás).
+    // Seguir pulsando al pasar 3/4 de vuelta añade otra (doble con Banger, triple con Double Up)
+    if (a.flipName && a.flipTurns && !a.flipDone && !a.sbend && !a.whirly) {
+      a.flipping = true;
+      if (rollIn && a.flipTurns < a.maxFlips && Math.abs(a.flip) > (a.flipTurns - 0.25) * TAU) a.flipTurns++;
+      const ph = (Math.abs(a.flip) % TAU) / TAU;                    // arranca, acelera a media vuelta y frena para caer
+      a.flip += a.flipDir * 7.6 * fast * (0.75 + 0.5 * Math.sin(Math.PI * ph)) * dt;
+      if (Math.abs(a.flip) >= a.flipTurns * TAU) { a.flip = a.flipDir * a.flipTurns * TAU; a.flipping = false; a.flipDone = true; }
     }
     if (a.whirly) { a.flip = Math.min(TAU, a.flip + 6.5 * dt); if (a.flip >= TAU) a.flipping = false; if (ry < -0.4) { a.spin += 5 * fast * dt; } }
     // ---- grabs con L (y tweak: deslizar a otra dirección sin levantar el dedo). Teclado: Mayús+G y flechas
@@ -1831,15 +1830,19 @@ function updateRider(dt, t) {
       // rolls como en Pocket Shredders: la vuelta es alrededor de la línea de la cuerda (hacia la barca), no de la tabla
       const q0r = tmp.q0r || (tmp.q0r = new T.Quaternion()), ax = tmp.axr || (tmp.axr = V3()), loc = tmp.locr || (tmp.locr = V3());
       q0r.copy(a.baseQ).multiply(tmp.q);
-      ax.set(towW.x - R.pos.x, 0, towW.z - R.pos.z).normalize();
-      if (a.flipAxis === 'z') ax.set(ax.z, 0, -ax.x);                 // tantrum: de lado a la cuerda
-      loc.set(a.flipAxis === 'x' ? 1 : 0, 0, a.flipAxis === 'x' ? 0 : 1).applyQuaternion(q0r);
-      let sg = Math.sign(loc.dot(ax)) || 1;
-      if (a.flipAxis === 'x') {   // la cabeza cae hacia los dedos en el front roll y hacia los talones en el backroll
-        loc.set(0, 0, 1).applyQuaternion(q0r);
-        sg = (Math.sign(loc.x * -ax.z + loc.z * ax.x) || 1) * (a.flipName === 'Front Roll' ? 1 : -1) * Math.sign(a.flip || 1);
+      if (!a.rollAx) {   // el eje y el sentido se fijan al empezar: si se recalculan a cada momento, a media vuelta salta y gira raro
+        a.rollAx = V3(towW.x - R.pos.x, 0, towW.z - R.pos.z).normalize();
+        if (a.flipAxis === 'z') a.rollAx.set(a.rollAx.z, 0, -a.rollAx.x);   // tantrum: de lado a la cuerda
+        ax.copy(a.rollAx);
+        loc.set(a.flipAxis === 'x' ? 1 : 0, 0, a.flipAxis === 'x' ? 0 : 1).applyQuaternion(q0r);
+        a.rollSg = Math.sign(loc.dot(ax)) || 1;
+        if (a.flipAxis === 'x') {   // la cabeza cae hacia los dedos en el front roll y hacia los talones en el backroll
+          loc.set(0, 0, 1).applyQuaternion(q0r);
+          a.rollSg = (Math.sign(loc.x * -ax.z + loc.z * ax.x) || 1) * (a.flipName === 'Front Roll' ? 1 : -1) * Math.sign(a.flipDir || 1);
+        }
       }
-      tmp.q2.setFromAxisAngle(ax, a.flip * sg);
+      ax.copy(a.rollAx);
+      tmp.q2.setFromAxisAngle(ax, a.flip * a.rollSg);
       riderRoot.quaternion.copy(tmp.q2).multiply(q0r);
     } else {
       tmp.q2.setFromAxisAngle(a.flipAxis === 'x' ? V3(1, 0, 0) : V3(0, 0, 1), a.flip);
@@ -1967,7 +1970,8 @@ function updateCamera(dt) {
   const side = tmp.b.set(-toBoat.z, 0, toBoat.x);
   const want = tmp.c, look = tmp.n;
   // como en Pocket Shredders: detrás y algo ladeada hacia el pecho del rider, para verle los brazos y la maneta
-  chestWorld(tmp.p2 = tmp.p2 || V3()); CAM.chest = (CAM.chest || V3()).lerp(tmp.p2, clamp(dt * 1.5, 0, 1));
+  chestWorld(tmp.p2 = tmp.p2 || V3());
+  if (R.state !== 'air' || !CAM.chest) CAM.chest = (CAM.chest || V3()).lerp(tmp.p2, clamp(dt * 1.5, 0, 1));   // en el aire no: al dar la vuelta el pecho gira y la cámara se iría de lado
   const portrait = camera.aspect < 1, far = portrait ? 1.35 : 1;
   const fov = portrait ? 74 : 58; if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
   if (!GAME.running) { introCamera(dt, rp, toBoat); return; }
