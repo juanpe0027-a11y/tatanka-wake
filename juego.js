@@ -1466,7 +1466,9 @@ function pop(q, kind, popPos) {
   if (kind === 'kicker') R.vy = 10.5 + (R.bangerOn ? 1 : 0);   // la rampa lanza bien alto
   R.state = 'air';
   chestWorld(tmp.c);
-  const toe = R.vel.clone().setY(0).dot(tmp.c) > 0;
+  // de puntas si se va hacia el lado al que mira el pecho (respecto a la estela; la tabla apunta donde va, así que se mira de lado)
+  const dTr = trailDir(tmp.trd || (tmp.trd = V3())), lpx = -dTr.z, lpz = dTr.x;
+  const toe = Math.sign(tmp.c.x * lpx + tmp.c.z * lpz) === Math.sign(R.vel.x * lpx + R.vel.z * lpz);
   const heel = !toe;
   const air = {
     t: 0, t0: performance.now(), spin: 0, spinDir: 0, spinning: false, maxSpinAbs: 0, rewound: false,
@@ -1802,7 +1804,7 @@ function updateRider(dt, t) {
       if (centerHold && a.grabT > 0.55 && !a.tweak && ['indy', 'mute', 'melon', 'stale'].includes(g)) a.tweak = rnd() < 0.5 ? 'Tweak' : 'Poke';   // aguantándolo: lo estira
       if (!a.grabs.includes(g)) a.grabs.push(g);
     } else { a.grab = null; }
-    R.crouch = lerp(R.crouch, a.grab ? 1 : a.raley > 0.2 ? 0.2 : (a.flipping || a.flipName && a.flip % TAU) ? 0.95 : 0.62, clamp(dt * 8, 0, 1));   // en el flip, encogido
+    R.crouch = lerp(R.crouch, a.grab ? 1 : a.raley > 0.2 ? 0.2 : (a.flipping || a.flipName && a.flip % TAU) ? (a.flipKind === 'roll' && a.flipAxis === 'x' ? 0.28 : 0.75) : 0.62, clamp(dt * 8, 0, 1));   // en el roll, estirado (como en Pocket Shredders); en el tantrum, algo recogido
     // aro de aterrizaje del stick R: se llena con la rotación y se pone verde cuando la tabla está alineada
     const spinErr = Math.abs(a.spin - Math.round(a.spin / Math.PI) * Math.PI), flipErr = Math.abs(a.flip - Math.round(a.flip / TAU) * TAU);
     const prog = Math.max((Math.abs(a.spin) % Math.PI) / Math.PI, (Math.abs(a.flip) % TAU) / TAU);
@@ -1825,8 +1827,24 @@ function updateRider(dt, t) {
   if (R.state === 'air') {
     const a = R.air;
     tmp.q.setFromAxisAngle(UP, a.spin);
-    tmp.q2.setFromAxisAngle(a.flipAxis === 'x' ? V3(1, 0, 0) : V3(0, 0, 1), a.flip);
-    riderRoot.quaternion.copy(a.baseQ).multiply(tmp.q).multiply(tmp.q2);
+    if (a.flipKind === 'roll' && a.flip) {
+      // rolls como en Pocket Shredders: la vuelta es alrededor de la línea de la cuerda (hacia la barca), no de la tabla
+      const q0r = tmp.q0r || (tmp.q0r = new T.Quaternion()), ax = tmp.axr || (tmp.axr = V3()), loc = tmp.locr || (tmp.locr = V3());
+      q0r.copy(a.baseQ).multiply(tmp.q);
+      ax.set(towW.x - R.pos.x, 0, towW.z - R.pos.z).normalize();
+      if (a.flipAxis === 'z') ax.set(ax.z, 0, -ax.x);                 // tantrum: de lado a la cuerda
+      loc.set(a.flipAxis === 'x' ? 1 : 0, 0, a.flipAxis === 'x' ? 0 : 1).applyQuaternion(q0r);
+      let sg = Math.sign(loc.dot(ax)) || 1;
+      if (a.flipAxis === 'x') {   // la cabeza cae hacia los dedos en el front roll y hacia los talones en el backroll
+        loc.set(0, 0, 1).applyQuaternion(q0r);
+        sg = (Math.sign(loc.x * -ax.z + loc.z * ax.x) || 1) * (a.flipName === 'Front Roll' ? 1 : -1) * Math.sign(a.flip || 1);
+      }
+      tmp.q2.setFromAxisAngle(ax, a.flip * sg);
+      riderRoot.quaternion.copy(tmp.q2).multiply(q0r);
+    } else {
+      tmp.q2.setFromAxisAngle(a.flipAxis === 'x' ? V3(1, 0, 0) : V3(0, 0, 1), a.flip);
+      riderRoot.quaternion.copy(a.baseQ).multiply(tmp.q).multiply(tmp.q2);
+    }
     if (a.raley > 0) riderRoot.rotateX(-1.35 * ss(a.raley));    // raley: el cuerpo estirado y la tabla por encima
     // los flips giran alrededor de la cintura (el centro de gravedad), no de la tabla: la tabla pasa por encima de la cabeza
     if (a.flip || a.raley) {
@@ -1943,7 +1961,8 @@ const CAM = { mode: 0, pos: V3(0, 5, 0), look: V3(), names: ['DETRÁS', 'BAJA', 
 function nextCam() { setCam((CAM.mode + 1) % CAM.names.length); msg('CÁMARA: ' + CAM.names[CAM.mode], 1.2); }
 function setCam(i) { CAM.mode = i; document.querySelectorAll('#cams .opt').forEach(b => b.classList.toggle('sel', +b.dataset.c === i)); }
 function updateCamera(dt) {
-  const R = RIDER, rp = riderRoot.position;
+  // la cámara sigue al rider (no al punto de giro de los flips: si no, se mueve rara al dar la vuelta)
+  const R = RIDER, rp = (tmp.camRP || (tmp.camRP = V3())).set(R.pos.x, R.y, R.pos.z);
   const toBoat = tmp.a.set(towW.x - rp.x, 0, towW.z - rp.z).normalize();
   const side = tmp.b.set(-toBoat.z, 0, toBoat.x);
   const want = tmp.c, look = tmp.n;
