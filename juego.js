@@ -1761,7 +1761,8 @@ function updateRider(dt, t) {
       }
       if (!a.flipDone) {
         a.flipping = true;
-        a.flip += a.flipDir * 7.6 * fast * dt;
+        const ph = (Math.abs(a.flip) % TAU) / TAU;                    // arranca, acelera a media vuelta y frena para caer
+        a.flip += a.flipDir * 7.6 * fast * (0.7 + 0.6 * Math.sin(Math.PI * ph)) * dt;
         if (Math.abs(a.flip) >= a.maxFlips * TAU) { a.flip = a.flipDir * a.maxFlips * TAU; a.flipping = false; a.flipDone = true; }
       }
       if (diag && !a.autoSpin) { a.spinning = true; a.spin += a.spinDir * 5.2 * fast * dt; }
@@ -1801,7 +1802,7 @@ function updateRider(dt, t) {
       if (centerHold && a.grabT > 0.55 && !a.tweak && ['indy', 'mute', 'melon', 'stale'].includes(g)) a.tweak = rnd() < 0.5 ? 'Tweak' : 'Poke';   // aguantándolo: lo estira
       if (!a.grabs.includes(g)) a.grabs.push(g);
     } else { a.grab = null; }
-    R.crouch = lerp(R.crouch, a.grab ? 1 : (a.raley > 0.2 ? 0.2 : 0.62), clamp(dt * 8, 0, 1));
+    R.crouch = lerp(R.crouch, a.grab ? 1 : a.raley > 0.2 ? 0.2 : (a.flipping || a.flipName && a.flip % TAU) ? 0.95 : 0.62, clamp(dt * 8, 0, 1));   // en el flip, encogido
     // aro de aterrizaje del stick R: se llena con la rotación y se pone verde cuando la tabla está alineada
     const spinErr = Math.abs(a.spin - Math.round(a.spin / Math.PI) * Math.PI), flipErr = Math.abs(a.flip - Math.round(a.flip / TAU) * TAU);
     const prog = Math.max((Math.abs(a.spin) % Math.PI) / Math.PI, (Math.abs(a.flip) % TAU) / TAU);
@@ -1827,6 +1828,13 @@ function updateRider(dt, t) {
     tmp.q2.setFromAxisAngle(a.flipAxis === 'x' ? V3(1, 0, 0) : V3(0, 0, 1), a.flip);
     riderRoot.quaternion.copy(a.baseQ).multiply(tmp.q).multiply(tmp.q2);
     if (a.raley > 0) riderRoot.rotateX(-1.35 * ss(a.raley));    // raley: el cuerpo estirado y la tabla por encima
+    // los flips giran alrededor de la cintura (el centro de gravedad), no de la tabla: la tabla pasa por encima de la cabeza
+    if (a.flip || a.raley) {
+      const pv = tmp.pv || (tmp.pv = V3()), q0 = tmp.q0 || (tmp.q0 = new T.Quaternion());
+      q0.copy(a.baseQ).multiply(tmp.q);                               // sin el flip
+      pv.set(0, 0.82, 0).applyQuaternion(q0); riderRoot.position.add(pv);
+      pv.set(0, 0.82, 0).applyQuaternion(riderRoot.quaternion); riderRoot.position.sub(pv);
+    }
     // grab con estilo: la tabla tirada hacia un lado (como en las fotos) y más cuanto más se aguanta
     const ST = { indy: [0.35, -0.45], mute: [0.3, 0.45], melon: [-0.4, 0.42], stale: [-0.35, -0.45], nose: [0.1, 0.6], tail: [0.1, -0.6], method: [-0.75, 0.55], japan: [0.6, 0.5], fashion: [-0.4, -0.5] }[a.grab] || [0, 0];   // [de canto, punta arriba/abajo]: con la punta inclinada una pierna sale estirada y la otra recogida
     const kk = a.grab ? (a.tweak ? 1.35 : 1) : 0;
