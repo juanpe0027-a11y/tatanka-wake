@@ -2055,7 +2055,8 @@ function updateCamera(dt) {
   chestWorld(tmp.p2 = tmp.p2 || V3());
   if (R.state !== 'air' || !CAM.chest) CAM.chest = (CAM.chest || V3()).lerp(tmp.p2, clamp(dt * 1.5, 0, 1));   // en el aire no: al dar la vuelta el pecho gira y la cámara se iría de lado
   const portrait = camera.aspect < 1, far = portrait ? 1.35 : 1;
-  const fov = portrait ? 74 : 58; if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  // primera persona: gran angular, como una cámara en el casco
+  const fov = CAM.mode === 6 && GAME.running ? (portrait ? 106 : 100) : portrait ? 74 : 58; if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
   if (!GAME.running) { introCamera(dt, rp, toBoat); return; }
   // se mira a un punto delante del rider en la línea hacia la barca: el rider queda en el centro de la pantalla
   if (CAM.mode === 0) { want.copy(rp).addScaledVector(toBoat, -7.2 * far).add(V3(0, 3.2 * far, 0)).addScaledVector(CAM.chest, portrait ? 1.2 : 2.8); look.copy(rp).addScaledVector(toBoat, 5).setY(1.1); }
@@ -2068,9 +2069,10 @@ function updateCamera(dt) {
   else if (CAM.mode === 6) {   // PRIMERA PERSONA: desde los ojos del rider, mirando a la barca (el horizonte no da vueltas en los flips)
     riderRoot.updateMatrixWorld(true);
     const eye = riderRoot.localToWorld(tmp.eye = (tmp.eye || V3()).copy(R.headL || V3(0, 1.6, 0)).add(V3(0, 0.06, 0)));
-    eye.addScaledVector(toBoat, 0.22);
+    eye.addScaledVector(chestWorld(tmp.chE = tmp.chE || V3()), 0.3).addScaledVector(toBoat, 0.05).y += 0.04;   // delante de la cara: mirando abajo se ven el pecho, los brazos, las piernas y la tabla
     const lat = R.vel.x * side.x + R.vel.z * side.z;
-    look.copy(eye).addScaledVector(toBoat, 12).addScaledVector(side, clamp(lat * 0.35, -4, 4)).setY(Math.max(0.3, eye.y - 1.8));   // algo hacia abajo: se ve la cuerda y la estela
+    // mirando hacia abajo (unos 42°): arriba la barca y la estela, abajo los brazos con la maneta, las piernas y la tabla
+    look.copy(eye).addScaledVector(toBoat, 6).addScaledVector(side, clamp(lat * 0.2, -2, 2)).setY(eye.y - 6.2);
     CAM.off = null; CAM.lookOff = null; CAM.pos.copy(eye);
     CAM.look1 = (CAM.look1 || look.clone()).lerp(look, clamp(dt * 8, 0, 1)); CAM.look.copy(CAM.look1);
     camera.position.copy(CAM.pos); camera.lookAt(CAM.look); return;
