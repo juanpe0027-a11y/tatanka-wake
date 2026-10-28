@@ -1281,6 +1281,100 @@ addEventListener('pointerdown', sfxInit, { capture: true }); addEventListener('k
 document.addEventListener('visibilitychange', () => { if (!SFX.ctx) return; if (document.hidden) SFX.ctx.suspend(); else SFX.ctx.resume(); });
 
 // =====================================================================================
+//  MÓDULOS DE WAKE PARK en el recorrido: 2 rampas (kicker) y 2 barandillas (flat bar), flotando junto a la estela.
+//  Medidas típicas: kicker de 5 m de largo, 3 m de ancho y 1,4 m de alto; flat bar de 12 m con el tubo a 0,8 m
+//  Para la barandilla: ollie antes de llegar y, encima, el botón GRIND; arriba sale la barra de equilibrio
+// =====================================================================================
+const MODULES = [
+  { type: 'kicker', x: 260, z: -120 + 9, dir: 1, L: 5, W: 3, H: 1.4 },
+  { type: 'rail', x: 470, z: -120 - 9, dir: 1, L: 12, H: 0.8 },
+  { type: 'kicker', x: 470, z: -310 - 9, dir: -1, L: 5, W: 3, H: 1.4 },
+  { type: 'rail', x: 240, z: -310 + 9, dir: -1, L: 12, H: 0.8 },
+];
+function modLocal(m, p) { return { u: (p.x - m.x) * m.dir, v: p.z - m.z }; }
+{
+  const floatM = MAT(0x1f6fb5, 0.55), topM = MAT(0x26292d, 0.6), sideM = MAT(0xf2f2ee, 0.6), pipeM = MAT(0xf2c21b, 0.35, 0.6), legM = MAT(0xd8dadc, 0.4, 0.6);
+  const logo = canvasTex(512, 128, (c, w, h) => { c.fillStyle = '#f2f2ee'; c.fillRect(0, 0, w, h); c.fillStyle = '#c8202a'; c.font = 'italic 900 70px Arial Black, sans-serif'; c.fillText('TATANKA', 40, 92); });
+  for (const m of MODULES) {
+    const g = new T.Group(); g.position.set(m.x, 0, m.z); g.rotation.y = m.dir > 0 ? 0 : Math.PI; world.add(g);
+    if (m.type === 'kicker') {
+      // perfil curvo de la rampa (sube hacia +x) extruido a lo ancho
+      const sh = new T.Shape(); sh.moveTo(-m.L / 2, -0.25);
+      for (let i = 0; i <= 16; i++) { const k = i / 16; sh.lineTo(-m.L / 2 + k * m.L, Math.pow(k, 1.7) * m.H); }
+      sh.lineTo(m.L / 2, -0.25); sh.lineTo(-m.L / 2, -0.25);
+      const geo = new T.ExtrudeGeometry(sh, { depth: m.W, bevelEnabled: false }); geo.translate(0, 0, -m.W / 2);
+      const k = new T.Mesh(geo, [topM, sideM]); k.castShadow = true; k.receiveShadow = true; g.add(k);
+      const lg = new T.Mesh(new T.PlaneGeometry(2.4, 0.6), MAT(0xffffff, 0.6, 0, { map: logo })); lg.position.set(m.L * 0.18, 0.45, m.W / 2 + 0.01); g.add(lg);
+      const lg2 = lg.clone(); lg2.rotation.y = Math.PI; lg2.position.z = -m.W / 2 - 0.01; g.add(lg2);
+      for (const zz of [-m.W / 2 + 0.4, m.W / 2 - 0.4]) box(m.L + 0.4, 0.5, 0.7, floatM, 0, -0.1, zz, g);   // flotadores azules
+    } else {
+      const pipe = new T.Mesh(new T.CylinderGeometry(0.06, 0.06, m.L, 14), pipeM); pipe.rotation.z = Math.PI / 2; pipe.position.y = m.H; pipe.castShadow = true; g.add(pipe);
+      for (let x = -m.L / 2 + 0.6; x <= m.L / 2 - 0.5; x += 2.7) {
+        rod(V3(x, 0.15, 0), V3(x, m.H - 0.05, 0), 0.05, legM, g);
+        box(1.2, 0.45, 1.2, floatM, x, -0.05, 0, g);
+      }
+      box(m.L, 0.12, 0.5, MAT(0x2a2d31, 0.6), 0, 0.15, 0, g);    // la viga que une los flotadores
+    }
+  }
+}
+// barra de equilibrio del grind
+{ const st = document.createElement('style'); st.textContent = `
+  #balBar { position: absolute; left: 50%; top: calc(64px + env(safe-area-inset-top)); transform: translateX(-50%); width: 210px; height: 16px; border-radius: 9px;
+    background: linear-gradient(90deg, #ff5a4e 0 14%, #ffc56b 14% 32%, #c3f53a 32% 68%, #ffc56b 68% 86%, #ff5a4e 86%); border: 2px solid #fff; display: none; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+  #balBar i { position: absolute; top: -6px; width: 4px; height: 24px; margin-left: -2px; background: #fff; border-radius: 2px; box-shadow: 0 0 4px #000; left: 50%; }
+  #balBar b { position: absolute; top: -20px; left: 0; right: 0; text-align: center; font: 800 11px system-ui, sans-serif; letter-spacing: .14em; text-shadow: 0 1px 3px #000; }
+  #stR.grind .knob { background: rgba(255,153,0,.85) !important; border-color: #fff !important; color: #fff; font-size: 10px !important; }`; document.head.appendChild(st); }
+const balBar = document.createElement('div'); balBar.id = 'balBar'; balBar.innerHTML = '<b>EQUILIBRIO</b><i></i>'; $('hud').appendChild(balBar);
+function startRail(m) {
+  const R = RIDER; R.state = 'rail'; R.air = null; R.vy = 0; R.omega = 0; setLandRing(0, false);
+  R.rail = { m, t: 0, t0: performance.now(), bal: rnd(-0.12, 0.12), bv: rnd(-0.3, 0.3) };
+  balBar.style.display = 'block'; say('BOARDSLIDE', '', 1);
+  sfxThump(160, 0.25, 0.1); sfxBurst(0.25, 2600, 1800, 0.08, 'bandpass', 2);   // el golpe metálico al caer en el tubo
+}
+function endRail(ollie) {
+  const R = RIDER, rl = R.rail; R.rail = null; balBar.style.display = 'none';
+  const rep = R.history.Rail || 0; R.history.Rail = rep + 1;
+  const pts = Math.round((150 + 350 * Math.min(rl.t, 2.5) + (ollie ? 200 : 0)) * Math.pow(0.8, rep) / 10) * 10;
+  R.score += pts; $('score').textContent = R.score.toLocaleString('es-ES');
+  REC.bestTrickPts < pts && (REC.bestTrickPts = pts, REC.bestTrick = 'Boardslide');
+  R.state = 'ride'; pop(ollie ? 0.8 : 0.1, ollie ? 'ollie' : 'hop');
+  say(`Boardslide${ollie ? ' to Ollie' : ''}<small>+${pts.toLocaleString('es-ES')}</small>`, '', 1.8);
+}
+function updateRail(dt, S) {
+  const R = RIDER, rl = R.rail, m = rl.m; rl.t += dt;
+  R.y = m.H + 0.04; R.vy = 0; R.omega = 0;
+  // equilibrio: se va solo hacia un lado (cada vez más) y se corrige con el círculo izquierdo
+  rl.bv += (rnd(-1, 1) * 2.4 + rl.bal * 2.2 - S.L.x * 4.2 * (CAM.mode === 2 ? -1 : 1)) * dt; rl.bv *= 1 - 1.2 * dt; rl.bal += rl.bv * dt;
+  balBar.querySelector('i').style.left = (50 + clamp(rl.bal, -1, 1) * 50) + '%';
+  R.lean = lerp(R.lean, rl.bal * 0.8, clamp(dt * 8, 0, 1)); R.crouch = lerp(R.crouch, 0.5, clamp(dt * 6, 0, 1));
+  const { u, v } = modLocal(m, R.pos);
+  if (Math.abs(rl.bal) > 1) { R.rail = null; balBar.style.display = 'none'; fall('¡TE HAS CAÍDO DEL RAIL!'); return; }
+  // ollie para salir: una pulsación NUEVA (soltar el GRIND con el que entraste no cuenta)
+  if (S.R.rel && !S.R.rel.circled && Math.hypot(S.R.rel.x, S.R.rel.y) < 0.35 && IN.R.t0 > rl.t0) { endRail(true); return; }
+  if (u > m.L / 2 || Math.abs(v) > 1.4) endRail(false);
+}
+// en el aire: ¿hay una barandilla debajo para entrar en grind?
+function railBelow() {
+  const R = RIDER;
+  for (const m of MODULES) {
+    if (m.type !== 'rail') continue;
+    const { u, v } = modLocal(m, R.pos);
+    if (u > -m.L / 2 + 0.3 && u < m.L / 2 - 1.2 && Math.abs(v) < 0.9 && R.y > m.H - 0.3 && R.y < m.H + 2.2) return m;
+  }
+  return null;
+}
+// en el agua: ¿estamos subiendo una rampa?
+function kickerUnder() {
+  const R = RIDER;
+  for (const m of MODULES) {
+    if (m.type !== 'kicker') continue;
+    const { u, v } = modLocal(m, R.pos);
+    if (u > -m.L / 2 && u < m.L / 2 + 0.3 && Math.abs(v) < m.W / 2 + 0.2) return { m, u, h: u >= m.L / 2 ? m.H : Math.pow((u + m.L / 2) / m.L, 1.7) * m.H };
+  }
+  return null;
+}
+
+// =====================================================================================
 //  EL RIDER: cuerda, carving, pop, aire, trucos, aterrizaje y caídas
 // =====================================================================================
 let ROPE = 22.9;   // 75 pies, como en Pocket Shredders (online: cada uno con un largo distinto)
@@ -1369,6 +1463,7 @@ function pop(q, kind, popPos) {
   R.vy = (1.7 + 5.0 * q * clamp(A, 0.25, 1.2) * clamp(vlat / 6, 0.3, 1.2)) * big * (du ? 1.5 : 1);
   if (kind === 'ollie') R.vy = 2.4 + 1.3 * q + (R.rollers ? 1 : 0);
   if (kind === 'hop') R.vy = 1.2;
+  if (kind === 'kicker') R.vy = 7.2 + (R.bangerOn ? 0.8 : 0);
   R.state = 'air';
   chestWorld(tmp.c);
   const toe = R.vel.clone().setY(0).dot(tmp.c) > 0;
@@ -1427,7 +1522,7 @@ function grabLabel(a) {
 }
 // dificultad de cada cosa (para los puntos y para llenar el Banger)
 function trickValue(a, halfTurns, flips) {
-  let v = a.kind === 'wake' ? 100 : (a.kind === 'ollie' ? 30 : 15);
+  let v = a.kind === 'kicker' ? 180 : a.kind === 'wake' ? 100 : (a.kind === 'ollie' ? 30 : 15);
   v += Math.abs(halfTurns) * 120;
   if (flips) v += (a.flipKind === 'tip' ? 600 : 480) * (Math.abs(flips) === 1 ? 1 : Math.abs(flips) === 2 ? 1.9 : 2.8);
   if (a.didRaley) v += 380;
@@ -1455,7 +1550,7 @@ function trickName(a, halfTurns, flips, deg) {
   } else if (a.rewound) n = `${edge} Rewind`;
   else if (deg) n = `${edge} ${a.spinDir > 0 ? 'FS' : 'BS'} ${deg}`;
   else if (g) n = '';
-  else n = a.kind === 'ollie' ? 'Ollie' : (a.kind === 'wake' ? `${edge} Air` : 'Hop');
+  else n = a.kind === 'ollie' ? 'Ollie' : a.kind === 'kicker' ? 'Kicker Air' : (a.kind === 'wake' ? `${edge} Air` : 'Hop');
   if (a.wrapped && !a.whirly) n = 'Wrapped ' + n;
   if (g) n = (n ? n + ' ' : '') + g;
   if (a.du) n = 'Double Up ' + n;
@@ -1525,13 +1620,15 @@ function updateRollers(dt) {
 
 function updateRider(dt, t) {
   const R = RIDER, S = readSticks(); R.lastS = S;
-  if (NET.pendingFall) { const why = NET.pendingFall; NET.pendingFall = null; pushFall(why); }   // empujón (se aplica al empezar el fotograma)
+  if (NET.pendingFall) { const why = NET.pendingFall; NET.pendingFall = null; pushFall(why); }
+  if (R.pendingRail && R.state === 'air') { const m = R.pendingRail; R.pendingRail = null; startRail(m); }   // empujón (se aplica al empezar el fotograma)
   drawSticks(S);
   R.prevPos.copy(R.pos);
   if (R.bangerOn) { R.banger -= dt * 0.025; if (R.banger < 0.75) { R.bangerOn = false; } updateMeters(); }
   // --- horizontal: la cuerda manda (péndulo detrás de la barca)
   if (R.state !== 'fallen') {
-    if (R.grind) R.omega *= Math.max(0, 1 - dt * 7);
+    if (R.state === 'rail') R.omega = 0;
+    else if (R.grind) R.omega *= Math.max(0, 1 - dt * 7);
     else if (R.state === 'ride' || R.state === 'start') {
       const c = R.state === 'start' ? 0 : S.L.x;          // solo cuenta lo lateral
       // el stick va según la pantalla: a la derecha = hacia la derecha de la cámara (en cualquier pie)
@@ -1556,7 +1653,11 @@ function updateRider(dt, t) {
     R.startT += dt; R.y = sH; R.crouch = lerp(1, 0.4, ss(R.startT / 1.4));
     if (R.startT > 1.4) R.state = 'ride';
   } else if (R.state === 'ride') {
-    R.y = lerp(R.y, sH, clamp(dt * 14, 0, 1));
+    const kk = kickerUnder();
+    if (kk) {   // subiendo la rampa: la tabla va por encima de ella y en el borde sale volando
+      R.y = Math.max(lerp(R.y, sH, clamp(dt * 14, 0, 1)), kk.h + 0.03); R.onKicker = kk.m;
+      if (kk.u >= kk.m.L / 2 - 0.05) { R.onKicker = null; pop(1, 'kicker'); }
+    } else { R.onKicker = null; R.y = lerp(R.y, sH, clamp(dt * 14, 0, 1)); }
     // --- en el agua: tap R arma Flip/Raley, círculo con R = mano envuelta, círculo con L = surface 180, tap L = la otra mano
     if (S.R.circle) { R.wrapped = R.wrapped && Math.sign(S.R.circle) !== R.wrapped ? 0 : S.R.circle; say(R.wrapped ? 'Handle wrapped' : 'Unwrapped', '', 0.9); }
     if (S.L.circle) surface180();
@@ -1676,7 +1777,9 @@ function updateRider(dt, t) {
         let g = IN.kb.KeyG ? grabFor(S.L.x, S.L.y, a.toe !== R.sw) : null;   // en el móvil el grab es solo con el botón GRAB (el círculo izquierdo es para dirigir)
     // solo si se pulsa YA en el aire (el dedo que estaba agachando para saltar no cuenta)
     const freshPress = IN.R.on ? IN.R.t0 > a.t0 : (IN.kb.Space && (IN.spaceT0 || 0) > a.t0);
-    const centerHold = S.R.hold && freshPress && Math.abs(S.R.x) < 0.01 && Math.abs(S.R.y) < 0.01 && !NET.pushTarget;
+    R.railNear = railBelow();
+    if (R.railNear && S.R.hold && freshPress && R.vy < 2.5) R.pendingRail = R.railNear;
+    const centerHold = S.R.hold && freshPress && Math.abs(S.R.x) < 0.01 && Math.abs(S.R.y) < 0.01 && !NET.pushTarget && !R.railNear;
     if (!g && centerHold) {
       if (!a.btnGrab) a.btnGrab = BTN_GRABS[Math.floor(rnd(0, BTN_GRABS.length))];
       g = a.btnGrab;
@@ -1705,6 +1808,8 @@ function updateRider(dt, t) {
     const ok = spinErr < 0.26 && flipErr < 0.3 && a.raley < 0.35;
     setLandRing(a.spin || a.flip || a.raley ? (ok ? 1 : prog) : 0, ok);
     if (R.y <= sH && R.vy < 0) land();
+  } else if (R.state === 'rail') {
+    updateRail(dt, S);
   } else if (R.state === 'fallen') {
     R.y = lerp(R.y, sH - 0.35, clamp(dt * 3, 0, 1));
   }
@@ -1730,6 +1835,8 @@ function updateRider(dt, t) {
     a.styL = lerp(a.styL || 0, LIFT * kk, clamp(dt * 7, 0, 1));
     BOARD_TW.on = Math.abs(a.styX) + Math.abs(a.styZ) + a.styL > 0.003;
     BOARD_TW.q.setFromEuler(new T.Euler(a.styX * 1.25 * (R.sw ? -1 : 1), 0, a.styZ)); BOARD_TW.off.set(0, a.styL, 0);
+  } else if (R.state === 'rail') {
+    riderRoot.rotation.set(0, R.yaw + Math.PI / 2, 0); riderRoot.rotateX(R.rail ? R.rail.bal * 0.25 : 0);
   } else if (R.state === 'fallen') {
     riderRoot.rotation.set(0, R.yaw, 0); riderRoot.rotateX(-1.25); riderRoot.rotateY(R.fallT * R.fallSpin * Math.max(0, 1 - R.fallT));
   } else {
@@ -2172,7 +2279,8 @@ function onNetMsg(m) {
 // el botón rojo mientras se puede empujar
 function drawPushBtn() {
   const on = !!NET.pushTarget, el = $('stR'), k = el.querySelector('.knob');
-  const txt = on ? 'EMPUJAR' : RIDER.state === 'air' ? 'GRAB' : 'OLLIE';
+  const txt = on ? 'EMPUJAR' : RIDER.state === 'air' ? (RIDER.railNear ? 'GRIND' : 'GRAB') : 'OLLIE';
+  el.classList.toggle('grind', txt === 'GRIND');
   if (el.classList.contains('push') !== on) el.classList.toggle('push', on);
   el.classList.toggle('grab', !on && txt === 'GRAB');
   if (k.textContent !== txt) k.textContent = txt;
