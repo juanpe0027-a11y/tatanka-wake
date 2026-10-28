@@ -1913,6 +1913,7 @@ function updateRider(dt, t) {
   const a = R.air;
   const gp = a && a.grab ? ({ japan: 'mute', method: 'melon', fashion: 'stale' }[a.grab] || a.grab) : null;
   computePose(R.crouch, R.state === 'air' ? 0 : R.lean, gp, gp ? 1 : 0, R.state !== 'fallen', a ? a.raley : 0, R.sw ? -1 : 1);
+  (R.headL || (R.headL = V3())).copy(J.hd);   // la cabeza (para la cámara en primera persona)
   poseBody(J);
   boardGroup.quaternion.copy(BOARD_TW.on ? BOARD_TW.q : tmp.qI || (tmp.qI = new T.Quaternion())); boardGroup.position.copy(BOARD_TW.on ? BOARD_TW.off : V3());
   BOARD_TW.on = false;   // (los demás riders se colocan sin esto)
@@ -1967,7 +1968,7 @@ function updateBoat(dt, t) {
 // =====================================================================================
 //  CÁMARAS
 // =====================================================================================
-const CAM = { mode: 0, pos: V3(0, 5, 0), look: V3(), names: ['DETRÁS', 'BAJA', 'DESDE LA BARCA', 'LATERAL', 'TODOS'] };
+const CAM = { mode: 0, pos: V3(0, 5, 0), look: V3(), names: ['DETRÁS', 'BAJA', 'DESDE LA BARCA', 'LATERAL', 'TODOS', 'CERCA', 'PRIMERA PERSONA'] };
 function nextCam() { setCam((CAM.mode + 1) % CAM.names.length); msg('CÁMARA: ' + CAM.names[CAM.mode], 1.2); }
 function setCam(i) { CAM.mode = i; document.querySelectorAll('#cams .opt').forEach(b => b.classList.toggle('sel', +b.dataset.c === i)); }
 function updateCamera(dt) {
@@ -1986,6 +1987,20 @@ function updateCamera(dt) {
   if (CAM.mode === 0) { want.copy(rp).addScaledVector(toBoat, -7.2 * far).add(V3(0, 3.2 * far, 0)).addScaledVector(CAM.chest, portrait ? 1.2 : 2.8); look.copy(rp).addScaledVector(toBoat, 5).setY(1.1); }
   else if (CAM.mode === 1) { want.copy(rp).addScaledVector(toBoat, -4.6 * far).add(V3(0, 1.4 * far, 0)).addScaledVector(side, portrait ? 0.5 : 1.2); look.copy(rp).addScaledVector(toBoat, 4).setY(1.0); }
   else if (CAM.mode === 2) { want.copy(towW).add(V3(0, 0.4, 0)).addScaledVector(toBoat, 0.6); look.copy(rp).setY(rp.y + 0.9); }
+  else if (CAM.mode === 5) {   // CERCA: justo detrás y un poco por encima del hombro
+    want.copy(rp).addScaledVector(toBoat, -3.1 * (portrait ? 1.15 : 1)).add(V3(0, 1.9, 0)).addScaledVector(CAM.chest, 0.7);
+    look.copy(rp).addScaledVector(toBoat, 6).setY(rp.y + 1.1);
+  }
+  else if (CAM.mode === 6) {   // PRIMERA PERSONA: desde los ojos del rider, mirando a la barca (el horizonte no da vueltas en los flips)
+    riderRoot.updateMatrixWorld(true);
+    const eye = riderRoot.localToWorld(tmp.eye = (tmp.eye || V3()).copy(R.headL || V3(0, 1.6, 0)).add(V3(0, 0.06, 0)));
+    eye.addScaledVector(toBoat, 0.22);
+    const lat = R.vel.x * side.x + R.vel.z * side.z;
+    look.copy(eye).addScaledVector(toBoat, 12).addScaledVector(side, clamp(lat * 0.35, -4, 4)).setY(Math.max(0.3, eye.y - 1.8));   // algo hacia abajo: se ve la cuerda y la estela
+    CAM.off = null; CAM.lookOff = null; CAM.pos.copy(eye);
+    CAM.look1 = (CAM.look1 || look.clone()).lerp(look, clamp(dt * 8, 0, 1)); CAM.look.copy(CAM.look1);
+    camera.position.copy(CAM.pos); camera.lookAt(CAM.look); return;
+  }
   else if (CAM.mode === 4) {   // TODOS: alta, detrás del rider con la cuerda más larga, para ver a toda la sala y la barca
     const back = Math.max(ROPE, ...Object.values(NET.peers).filter(P => P.st && P.st.p).map(P => ROPES[P.st.ln] || ROPE));
     const bh = tmp.p2b = (tmp.p2b || V3()).set(boatVel.x, 0, boatVel.z).normalize();
@@ -1995,9 +2010,9 @@ function updateCamera(dt) {
     camera.position.copy(CAM.pos); camera.lookAt(CAM.look); return;
   }
   else { want.copy(rp).addScaledVector(side, -9 * far).addScaledVector(toBoat, 2).add(V3(0, 2.0, 0)); look.copy(rp).setY(rp.y + 0.9); }
-  if (R.state === 'air' && CAM.mode !== 2) { want.y += R.y * 0.45; look.y += R.y * 0.6; }
+  if (R.state === 'air' && CAM.mode !== 2) { want.y += R.y * (CAM.mode === 5 ? 0.2 : 0.45); look.y += R.y * (CAM.mode === 5 ? 0.3 : 0.6); }
   // se suaviza la posición RELATIVA al rider: así va siempre centrado aunque cruce rápido de un lado a otro
-  const k = clamp(dt * (CAM.mode === 2 ? 10 : 3.5), 0, 1);
+  const k = clamp(dt * (CAM.mode === 2 ? 10 : CAM.mode === 5 ? 5 : 3.5), 0, 1);
   CAM.off = (CAM.off || want.clone().sub(rp)).lerp(want.sub(rp), k);
   CAM.lookOff = (CAM.lookOff || look.clone().sub(rp)).lerp(look.sub(rp), clamp(dt * 6, 0, 1));
   CAM.pos.copy(rp).add(CAM.off); CAM.look.copy(rp).add(CAM.lookOff);
