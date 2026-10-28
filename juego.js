@@ -885,7 +885,7 @@ let poseBody = poseDummy;   // se sustituye al cargar senen.glb
 const J = {}; for (const k of ['hB', 'hF', 'kB', 'kF', 'fB', 'fF', 'ch', 'hd', 'sB', 'sF', 'eB', 'eF', 'aB', 'aF', 'fw', 'handle', 'toeB', 'toeF']) J[k] = V3();
 // c: flexión (0 de pie .. 1 encogido) · lean: + hacia los dedos, - hacia los talones · grab: tipo y fuerza
 // movimiento vivo del cuerpo: amortiguación de las piernas (muelle), tensión de la cuerda, giro y respiración
-const DYN = { t: 0, absorb: 0, absVel: 0, tension: 0, spin: 0, air: 0, prevSH: 0, prevVs: 0 };
+const DYN = { t: 0, absorb: 0, absVel: 0, tension: 0, spin: 0, air: 0, prevSH: 0, prevVs: 0, ropeL: null, bAngRel: null, raley: 0, hold: null, manual: 0, manualOne: 0 };
 // sb: hacia qué lado de la tabla está la barca (+1 en regular, la punta; -1 en switch, la cola)
 // manos: a ratos (al azar) va con una sola mano y la otra abierta para equilibrarse; y algunas veces, al aterrizar
 // un giro, cae con la maneta por la espalda, la otra mano la coge por detrás y la vuelve a traer delante
@@ -991,6 +991,59 @@ function computePose(c, lean, grab, grabK, handleOn, raley = 0, sb = 1) {
     } else H.backElbow = 0;
   } else HANDS.backElbow = 0;
   if (!handleOn) { J.aF.copy(J.sF).add(V3(0.1, -0.45, 0.25)); J.aB.copy(J.sB).add(V3(-0.15, -0.4, 0.3)); }
+  // ---- en el aire la maneta apunta siempre a la barca (la cuerda tira de ella). Al girar, en el cuerpo da la vuelta
+  //      a la cintura: con el pecho hacia la barca va delante con las dos manos; con la espalda hacia la barca va pegada
+  //      a la espalda, las dos manos se juntan detrás y una se la pasa a la otra (el paso de maneta de los 360)
+  D.hold = null;
+  const RL = D.ropeL;
+  if (RL && handleOn && D.air > 0.01 && !(grab && grabK > 0)) {
+    const k = ss(D.air), rk = ss(clamp(D.raley, 0, 1));
+    // ángulo de la cuerda por el lado de la espalda (0 = hacia la punta de delante, 90° = la espalda justo hacia la barca)
+    //  (medido desde cómo salió: de talones la cuerda ya va algo por detrás y eso no es un paso de maneta)
+    const bAng = D.bAngRel !== null ? D.bAngRel : Math.atan2(-RL.z, RL.x * sb);
+    // la cuerda «como si hubiera salido recto»: las manos y la maneta siguen el giro del cuerpo desde el despegue
+    const hz0 = Math.hypot(RL.x, RL.z), RV = V3(hz0 * Math.cos(bAng) * sb, RL.y, -hz0 * Math.sin(bAng));
+    const behind = ss(clamp((bAng - 0.72) / 0.45, 0, 1)) * ss(clamp((2.42 - bAng) / 0.45, 0, 1)), vert = clamp(Math.abs(RV.y) * 1.4, 0, 1);
+    const cx0 = (J.hF.x + J.hB.x) / 2, r = lerp(lerp(clamp(pull, 0.3, 0.5), 0.26, behind), 0.24, vert);
+    const hp = V3(cx0, hy - 0.02, hz).addScaledVector(RV, r);
+    hp.z += 0.18 * (1 - behind) * (1 - vert); hp.y += 0.04 * behind;
+    if (rk > 0) {   // raley: los brazos estirados hacia la barca desde los hombros
+      const shc = V3().addVectors(J.sF, J.sB).multiplyScalar(0.5).addScaledVector(RL, 0.62);
+      hp.lerp(shc, rk);
+    }
+    J.handle.lerp(hp, k);
+    const bar = V3(-RV.z, 0, RV.x).multiplyScalar(sb); if (bar.lengthSq() < 1e-4) bar.set(0, 0, 1); bar.normalize();
+    const gF = V3().copy(J.handle).addScaledVector(bar, -0.1 * (1 - 0.6 * behind)), gB = V3().copy(J.handle).addScaledVector(bar, 0.1 * (1 - 0.6 * behind));
+    // la mano del lado de la maneta la lleva; en medio (justo con la espalda a la barca) la llevan las dos: ahí se pasa
+    const hF = lerp(1, clamp((RV.x + 0.15) / 0.3, 0, 1), behind * (1 - rk)), hB = lerp(1, clamp((0.15 - RV.x) / 0.3, 0, 1), behind * (1 - rk));
+    const freeF = V3().copy(J.sF).add(V3(0.42, -0.3, 0.18)), freeB = V3().copy(J.sB).add(V3(-0.42, -0.3, 0.18));   // la libre, abierta para equilibrarse
+    J.aF.lerp(V3().lerpVectors(freeF, gF, ss(hF)), k); J.aB.lerp(V3().lerpVectors(freeB, gB, ss(hB)), k);
+    D.hold = hF > 0.5 && hB < 0.5 ? 'F' : hB > 0.5 && hF < 0.5 ? 'B' : null;
+    HANDS.backElbow = Math.max(HANDS.backElbow || 0, behind * k);
+  }
+  // ---- raley: piernas estiradas hacia atrás (rodillas en línea con cadera y pies) y el cuerpo arqueado, la cabeza alta
+  if (D.raley > 0.01 && handleOn) {
+    const k = ss(clamp(D.raley, 0, 1));
+    J.kF.lerp(V3().lerpVectors(J.hF, J.fF, 0.5).add(V3(0, 0, 0.02)), k); J.kB.lerp(V3().lerpVectors(J.hB, J.fB, 0.5).add(V3(0, 0, 0.02)), k);
+    J.hF.y += 0.08 * k; J.hB.y += 0.08 * k;                       // cadera lejos de los pies: las piernas rectas
+    J.hd.y += 0.02 * k;                                          // la cabeza levantada, mirando a la barca
+  }
+  // ---- manual: la cadera atrás sobre la cola y el pecho hacia delante (la tabla sube, el cuerpo no se tumba);
+  //      a fondo, suelta la mano de atrás y la lleva estirada hacia atrás
+  if (D.manual > 0.01 && handleOn) {
+    const m = D.manual, fw = sb;
+    J.hF.x -= 0.1 * fw * m; J.hB.x -= 0.1 * fw * m; J.hF.y -= 0.05 * m; J.hB.y -= 0.05 * m;
+    J.ch.x += 0.36 * fw * m; J.hd.x += 0.46 * fw * m; J.sF.x += 0.36 * fw * m; J.sB.x += 0.36 * fw * m;
+    J.kF.x += 0.06 * fw * m; J.kB.x += 0.03 * fw * m;
+    J.handle.x += 0.3 * fw * m; J.aF.x += 0.3 * fw * m; J.aB.x += 0.3 * fw * m;
+    if (D.manualOne > 0.01) {
+      const o = D.manualOne, lead = fw > 0 ? 'F' : 'B', back = lead === 'F' ? 'B' : 'F';
+      J['a' + lead].lerp(J.handle, o);
+      const sh = J['s' + back];
+      J['a' + back].lerp(V3(sh.x - 0.6 * fw, sh.y - 0.12, sh.z - 0.08), o);   // el brazo recto hacia atrás
+      D.hold = lead;
+    }
+  }
   // codos: casi rectos cuando tira la cuerda, más doblados cuando está suelta o en los giros
   const bend = 0.04 - 0.03 * tens + 0.08 * D.spin;
   J.eF.lerpVectors(J.sF, J.aF, 0.5).add(V3(0, -bend, 0.05 + bend * 0.4)); J.eB.lerpVectors(J.sB, J.aB, 0.5).add(V3(0, -bend, 0.05 + bend * 0.4));
@@ -1179,6 +1232,7 @@ function readSticks() {
   }
   if (k.KeyW) R.y = 1; if (k.KeyS) R.y = -1; if (k.KeyA) R.x = -1; if (k.KeyD) R.x = 1;
   if (k.KeyR) { R.y = -1; R.x = 0; R.raleyKey = true; }
+  if (IN.raleyBtn) R.raleyBtn = true;
   if (IN.kbSBend) { R.circle = 1; IN.kbSBend = false; }
   return { L, R };
 }
@@ -1728,8 +1782,10 @@ function updateRider(dt, t) {
     const rx = S.R.x, ry = S.R.y, rr = Math.hypot(rx, ry);
     const diag = Math.abs(rx) > 0.42 && Math.abs(ry) > 0.42;
     // ---- raley: R abajo mantenido desde la salida; soltar trae la tabla de vuelta. S-Bend: media vuelta con R en el raley
+    // botón RALEY (o la R del teclado): en el aire, si no hay otro truco a medias, empieza el raley
+    if ((S.R.raleyBtn || S.R.raleyKey) && !a.raleyOn && !a.flipName && !a.spinning && !a.autoSpin && !a.grab && Math.abs(a.spin % Math.PI) < 0.05 && a.raley < 0.05 && !a.didRaley) { a.raleyOn = true; a.raleyAx = null; }
     if (a.raleyOn) {
-      if (ry < -0.4 || S.R.raleyKey) { a.raley = Math.min(1, a.raley + dt * 3.2); if (a.raley > 0.6) a.didRaley = true; }
+      if (ry < -0.4 || S.R.raleyKey || S.R.raleyBtn) { a.raley = Math.min(1, a.raley + dt * 3.2); if (a.raley > 0.6) a.didRaley = true; }
       else { a.raleyOn = false; }
       if (S.R.circle && a.raley > 0.6 && !a.sbend) { a.sbend = 1; a.sbendOn = true; a.flipAxis = 'x'; a.flipDir = 1; a.flipName = 'S-Bend'; }
     } else a.raley = Math.max(0, a.raley - dt * 3.5);
@@ -1810,7 +1866,7 @@ function updateRider(dt, t) {
       if (centerHold && a.grabT > 0.55 && !a.tweak && ['indy', 'mute', 'melon', 'stale'].includes(g)) a.tweak = rnd() < 0.5 ? 'Tweak' : 'Poke';   // aguantándolo: lo estira
       if (!a.grabs.includes(g)) a.grabs.push(g);
     } else { a.grab = null; }
-    R.crouch = lerp(R.crouch, a.grab ? 1 : a.raley > 0.2 ? 0.2 : (a.flipping || a.flipName && a.flip % TAU) ? (a.flipKind === 'roll' && a.flipAxis === 'x' ? 0.28 : 0.75) : 0.62, clamp(dt * 8, 0, 1));   // en el roll, estirado (como en Pocket Shredders); en el tantrum, algo recogido
+    R.crouch = lerp(R.crouch, a.grab ? 1 : a.raley > 0.2 ? 0 : (a.flipping || a.flipName && a.flip % TAU) ? (a.flipKind === 'roll' && a.flipAxis === 'x' ? 0.28 : 0.75) : 0.62, clamp(dt * 8, 0, 1));   // en el roll, estirado (como en Pocket Shredders); en el tantrum, algo recogido
     // aro de aterrizaje del stick R: se llena con la rotación y se pone verde cuando la tabla está alineada
     const spinErr = Math.abs(a.spin - Math.round(a.spin / Math.PI) * Math.PI), flipErr = Math.abs(a.flip - Math.round(a.flip / TAU) * TAU);
     const prog = Math.max((Math.abs(a.spin) % Math.PI) / Math.PI, (Math.abs(a.flip) % TAU) / TAU);
@@ -1855,7 +1911,10 @@ function updateRider(dt, t) {
       tmp.q2.setFromAxisAngle(a.flipAxis === 'x' ? V3(1, 0, 0) : V3(0, 0, 1), a.flip);
       riderRoot.quaternion.copy(a.baseQ).multiply(tmp.q).multiply(tmp.q2);
     }
-    if (a.raley > 0) riderRoot.rotateX(-1.35 * ss(a.raley));    // raley: el cuerpo estirado y la tabla por encima
+    if (a.raley > 0) {   // raley: el cuerpo estirado a lo largo de la cuerda, la cabeza hacia la barca y las piernas y la tabla atrás, por encima de la cabeza
+      if (!a.raleyAx) a.raleyAx = V3().crossVectors(UP, V3(towW.x - R.pos.x, 0, towW.z - R.pos.z).normalize());   // gira en el plano de la cuerda
+      tmp.q2.setFromAxisAngle(a.raleyAx, 1.92 * ss(a.raley)); riderRoot.quaternion.premultiply(tmp.q2);
+    }
     // los flips giran alrededor de la cintura (el centro de gravedad), no de la tabla: la tabla pasa por encima de la cabeza
     if (a.flip || a.raley) {
       const pv = tmp.pv || (tmp.pv = V3()), q0 = tmp.q0 || (tmp.q0 = new T.Quaternion());
@@ -1891,8 +1950,11 @@ function updateRider(dt, t) {
     riderRoot.quaternion.copy(tmp.q2).multiply(tmp.q);
     riderRoot.rotateX(R.edge);
     // manual: gira sobre la cola (la punta sube y la cola se queda en el agua)
-    R.manual = lerp(R.manual || 0, R.manualT && R.state === 'ride' ? 1 : 0, clamp(dt * 8, 0, 1));
-    if (R.manual > 0.005) { const m = R.manual * 0.34; riderRoot.rotateZ(m); riderRoot.position.y += Math.sin(m) * 0.62; }
+    //         (la de delante según hacia dónde va: en switch es la cola de la tabla). Más abajo el círculo, más sube
+    const mDeep = R.manualT ? clamp((-S.L.y - 0.6) / 0.35, 0, 1) : 0;
+    R.manual = lerp(R.manual || 0, R.manualT && R.state === 'ride' ? 0.8 + 0.2 * mDeep : 0, clamp(dt * 8, 0, 1));
+    R.manualOne = lerp(R.manualOne || 0, R.manualT && R.state === 'ride' && -S.L.y > 0.9 ? 1 : 0, clamp(dt * 6, 0, 1));   // a fondo: de una mano
+    if (R.manual > 0.005) { const m = R.manual * 0.62; riderRoot.rotateZ(m * (R.sw ? -1 : 1)); riderRoot.position.y += Math.sin(m) * 0.6; }
     const sp = Math.abs(latV) + (R.grind ? 6 : 0), n = Math.min(R.grind ? 7 : 4, Math.floor(sp * 0.6 * dt * 60 * 0.25 + rnd()));
     for (let i = 0; i < n; i++) {
       tmp.a.set(rnd(-0.6, 0.6), 0.02, -Math.sign(latV) * 0.2).applyQuaternion(riderRoot.quaternion).add(riderRoot.position);
@@ -1912,7 +1974,19 @@ function updateRider(dt, t) {
   // --- postura y cuerpo
   const a = R.air;
   const gp = a && a.grab ? ({ japan: 'mute', method: 'melon', fashion: 'stale' }[a.grab] || a.grab) : null;
+  riderRoot.updateMatrixWorld(true);
+  DYN.ropeL = (tmp.ropeL || (tmp.ropeL = V3())).copy(towW).sub(riderRoot.localToWorld(tmp.wc = (tmp.wc || V3()).set(0, 0.82, 0))).normalize()
+    .applyQuaternion((tmp.qInv2 || (tmp.qInv2 = new T.Quaternion())).copy(riderRoot.quaternion).invert());
+  DYN.bAngRel = null;
+  if (a) {
+    const ba = Math.atan2(-DYN.ropeL.z, DYN.ropeL.x * (R.sw ? -1 : 1));
+    if (a.bAng0 === undefined) a.bAng0 = ba;
+    let d = ba - a.bAng0; d -= TAU * Math.round(d / TAU); DYN.bAngRel = d + 0.3;
+  }
+  DYN.raley = a ? a.raley : 0; DYN.manual = R.state === 'ride' ? (R.manual || 0) : 0; DYN.manualOne = DYN.manual > 0.1 ? (R.manualOne || 0) : 0;
   computePose(R.crouch, R.state === 'air' ? 0 : R.lean, gp, gp ? 1 : 0, R.state !== 'fallen', a ? a.raley : 0, R.sw ? -1 : 1);
+  DYN.holdNow = DYN.hold;
+  DYN.ropeL = null; DYN.raley = 0; DYN.manual = 0; DYN.manualOne = 0;   // (los demás riders se colocan sin esto)
   (R.headL || (R.headL = V3())).copy(J.hd);   // la cabeza (para la cámara en primera persona)
   poseBody(J);
   boardGroup.quaternion.copy(BOARD_TW.on ? BOARD_TW.q : tmp.qI || (tmp.qI = new T.Quaternion())); boardGroup.position.copy(BOARD_TW.on ? BOARD_TW.off : V3());
@@ -2126,7 +2200,7 @@ function handWorld(out) {
   if (!SENEN || !SENEN.knuckL) return false;
   const a = RIDER.air, g = a && a.grab;
   const pl = SENEN.knuckL.getWorldPosition(tmp.n), pr = SENEN.knuckR.getWorldPosition(tmp.c);
-  const hh = RIDER.state === 'ride' ? holdingHand() : null;
+  const hh = DYN.holdNow || (RIDER.state === 'ride' ? holdingHand() : null);
   if (g && RIDER.state === 'air') { const gg = { japan: 'mute', method: 'melon', fashion: 'stale' }[g] || g, gh = (GRAB_POS[gg] || [0, 'B'])[1], rope = gh === 'F' ? 'B' : 'F'; out.copy((rope === 'F') === !!SENEN.LF ? pl : pr); }   // la otra mano lleva la cuerda
   else if (hh) out.copy((hh === 'F') === !!SENEN.LF ? pl : pr);           // con una mano: la de la maneta
   else out.addVectors(pl, pr).multiplyScalar(0.5);
@@ -2330,7 +2404,24 @@ function onNetMsg(m) {
   else pushWon(m.fn || 'otro rider');
 }
 // el botón rojo mientras se puede empujar
+// botón RALEY: sale a la izquierda del círculo derecho, solo en el aire
+{ const b = document.createElement('button'); b.id = 'bRaley'; b.textContent = 'RALEY'; b.hidden = true; $('hud').appendChild(b);
+  const on = e => { e.preventDefault(); e.stopPropagation(); IN.raleyBtn = true; b.classList.add('on'); };
+  const off = () => { IN.raleyBtn = false; b.classList.remove('on'); };
+  b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('pointerleave', off);
+  b.addEventListener('contextmenu', e => e.preventDefault());
+}
+function drawRaleyBtn() {
+  const b = $('bRaley'), a = RIDER.air;
+  const show = RIDER.state === 'air' && !NET.pushTarget && GAME.running && !(a && a.flipName && !a.raleyOn);
+  if (b.hidden === show) {
+    b.hidden = !show;
+    if (show) { const r = $('stR').getBoundingClientRect(), h = $('hud').getBoundingClientRect(); b.style.left = (r.left - h.left - 70) + 'px'; b.style.top = (r.top - h.top - 26) + 'px'; }
+    else { IN.raleyBtn = false; b.classList.remove('on'); }
+  }
+}
 function drawPushBtn() {
+  drawRaleyBtn();
   const on = !!NET.pushTarget, el = $('stR'), k = el.querySelector('.knob');
   const txt = on ? 'EMPUJAR' : RIDER.state === 'air' ? (RIDER.railNear ? 'GRIND' : 'GRAB') : 'OLLIE';
   el.classList.toggle('grind', txt === 'GRIND');
@@ -2340,6 +2431,10 @@ function drawPushBtn() {
 }
 { const st = document.createElement('style'); st.textContent = `
   #stR.grab .knob { background: rgba(195,245,58,.55) !important; border-color: #f4ffd8 !important; color: #10220a; font-size: 10px !important; }
+  #bRaley { position: absolute; z-index: 6; width: 64px; height: 64px; border-radius: 50%; pointer-events: auto; touch-action: none;
+    font: 900 11px system-ui, sans-serif; letter-spacing: .06em; color: #fff; background: rgba(40,140,255,.5); border: 2px solid #e6f2ff;
+    box-shadow: 0 2px 10px rgba(0,0,0,.35); -webkit-user-select: none; user-select: none; }
+  #bRaley.on { background: rgba(40,140,255,.9); transform: scale(.94); }
   #bMenu { position: absolute; left: max(14px, env(safe-area-inset-left)); top: calc(112px + env(safe-area-inset-top)); pointer-events: auto;
     font: 800 11px system-ui, sans-serif; letter-spacing: .12em; color: #fff; background: rgba(0,0,0,.28); border: 1.5px solid rgba(255,255,255,.8); border-radius: 14px; padding: 4px 10px; }`;
   document.head.appendChild(st); }
